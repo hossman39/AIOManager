@@ -1,0 +1,303 @@
+import { randomUUID } from 'node:crypto'
+import { parseCredentialImport } from '../../shared/credential-import.js'
+import { authenticateManager } from './auth.js'
+import { equalSecret } from './crypto.js'
+import { ManagedError } from './errors.js'
+
+const context = (owner, id, purpose) => ({ owner, id, purpose })
+
+export function parseImportBody(body) {
+  return parseCredentialImport(JSON.stringify(body))
+}
+
+/** No provider transport is accepted by this repository: staging cannot activate. */
+export function createManagedRepository({ db, crypto, legacyKeys, now = Date.now }) {
+  const authorize = (auth) => authenticateManager(db, auth, legacyKeys)
+
+  async function ownerTransaction(auth, operation) {
+    return db.transaction(async (tx) => {
+      const owner = await authenticateManager(tx, auth, legacyKeys, { lock: true })
+      const timestamp = now()
+      await tx.run(
+        `INSERT INTO managed_owners (owner_id, created_at, updated_at)
+        VALUES ($1, $2, $2) ON CONFLICT (owner_id) DO NOTHING`,
+        [owner, timestamp]
+      )
+      const ownerRow = await tx.get(
+        `SELECT * FROM managed_owners WHERE owner_id = $1${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
+        [owner]
+      )
+      return operation(tx, owner, ownerRow, timestamp)
+    })
+  }
+
+  async function idempotent(tx, owner, scope, requestKey, input, timestamp, operation) {
+    if (typeof requestKey !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(requestKey))
+      throw new ManagedError('IDEMPOTENCY_KEY_REQUIRED')
+    const digest = crypto.fingerprint(input, context(owner, scope, 'request'))
+    const responseContext = context(owner, `${scope}:${requestKey}`, 'idempotency-response')
+    const previous = await tx.get(
+      'SELECT request_digest, response_enc FROM managed_idempotency WHERE owner_id = $1 AND scope = $2 AND request_key = $3',
+      [owner, scope, requestKey]
+    )
+    if (previous) {
+      if (!equalSecret(previous.request_digest, digest))
+        throw new ManagedError('IDEMPOTENCY_CONFLICT')
+      return { ...crypto.open(previous.response_enc, responseContext), replayed: true }
+    }
+    const result = await operation()
+    await tx.run(
+      `INSERT INTO managed_idempotency (owner_id, scope, request_key, request_digest, response_enc, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6)`,
+      [owner, scope, requestKey, digest, crypto.seal(result, responseContext), timestamp]
+    )
+    return result
+  }
+
+  async function inspectCandidates(connection, owner, parsed) {
+    const candidates = []
+    for (const candidate of parsed.accounts) {
+      const emailKey = crypto.fingerprint(
+        candidate.email.toLowerCase(),
+        context(owner, 'email', 'lookup')
+      )
+      const existing = await connection.get(
+        'SELECT id, credentials_enc FROM managed_accounts WHERE owner_id = $1 AND email_key = $2',
+        [owner, emailKey]
+      )
+      const credentials = existing
+        ? crypto.open(existing.credentials_enc, context(owner, existing.id, 'credentials'))
+        : null
+      candidates.push({
+        candidate,
+        emailKey,
+        existing,
+        status: !existing
+          ? 'ready'
+          : equalSecret(credentials.password, candidate.password)
+            ? 'existing'
+            : 'conflict',
+      })
+    }
+    return candidates
+  }
+
+  function publicCandidate({ candidate, existing, status }) {
+    return {
+      ...(existing ? { id: existing.id } : {}),
+      email: candidate.email,
+      name: candidate.name,
+      sourceRows: candidate.sourceRows,
+      status,
+    }
+  }
+
+  function publicAccount(row) {
+    const credentials = crypto.open(
+      row.credentials_enc,
+      context(row.owner_id, row.id, 'credentials')
+    )
+    return {
+      id: row.id,
+      email: credentials.email,
+      name: credentials.name,
+      state: row.state,
+      groupId: row.group_id,
+      version: row.record_version,
+      policyVersion: row.policy_version,
+      expiry:
+        row.expiry_at === null
+          ? null
+          : {
+              at: row.expiry_at,
+              local: row.expiry_local,
+              offset: row.expiry_offset,
+              timezone: row.expiry_timezone,
+            },
+      safeMode: row.safe_mode === null ? null : row.safe_mode === 1,
+      appliedVersion: row.applied_version,
+      appliedTarget: row.applied_target,
+      verifiedAt: row.verified_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }
+  }
+
+  return Object.freeze({
+    authorize,
+    async previewImport(auth, parsed) {
+      if (!parsed?.ok) throw new ManagedError('INVALID_INPUT')
+      const owner = await authorize(auth)
+      const candidates = await inspectCandidates(db, owner, parsed)
+      return {
+        sourceFormat: parsed.sourceFormat,
+        totalRows: parsed.totalRows,
+        accounts: candidates.map(publicCandidate),
+        issues: parsed.issues,
+      }
+    },
+    async stageImport(auth, parsed, requestKey) {
+      if (!parsed?.ok) throw new ManagedError('INVALID_INPUT')
+      return ownerTransaction(auth, (tx, owner, _ownerRow, timestamp) =>
+        idempotent(tx, owner, 'imports.stage', requestKey, parsed, timestamp, async () => {
+          const sourceDigest = crypto.fingerprint(parsed, context(owner, 'import', 'batch'))
+          const priorBatch = await tx.get(
+            'SELECT id, report_enc FROM managed_batches WHERE owner_id = $1 AND source_digest = $2',
+            [owner, sourceDigest]
+          )
+          if (priorBatch)
+            return {
+              ...crypto.open(priorBatch.report_enc, context(owner, priorBatch.id, 'batch-report')),
+              replayed: true,
+            }
+
+          const candidates = await inspectCandidates(tx, owner, parsed)
+          const report = {
+            batchId: randomUUID(),
+            createdAt: timestamp,
+            sourceFormat: parsed.sourceFormat,
+            totalRows: parsed.totalRows,
+            candidateAccounts: candidates.length,
+            created: 0,
+            existing: 0,
+            conflicts: 0,
+            issues: [...parsed.issues],
+            accounts: [],
+            replayed: false,
+          }
+          for (const item of candidates) {
+            const { candidate, emailKey, status } = item
+            if (status === 'ready') {
+              const id = randomUUID()
+              const credentials = {
+                email: candidate.email,
+                name: candidate.email,
+                password: candidate.password,
+              }
+              await tx.run(
+                `INSERT INTO managed_accounts
+                (id, owner_id, email_key, credentials_enc, personal_enc, configuration_enc, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+                [
+                  id,
+                  owner,
+                  emailKey,
+                  crypto.seal(credentials, context(owner, id, 'credentials')),
+                  crypto.seal([], context(owner, id, 'personal-addons')),
+                  crypto.seal([], context(owner, id, 'configuration')),
+                  timestamp,
+                ]
+              )
+              report.created++
+              report.accounts.push({ ...publicCandidate(item), id, status: 'staged' })
+            } else {
+              report[status === 'existing' ? 'existing' : 'conflicts']++
+              report.accounts.push(publicCandidate(item))
+              if (status === 'conflict') {
+                for (const row of candidate.sourceRows)
+                  report.issues.push({
+                    row,
+                    code: 'EXISTING_PASSWORD_CONFLICT',
+                    message: 'The saved password differs. No credentials were replaced.',
+                  })
+              }
+            }
+          }
+          report.issues.sort((a, b) => a.row - b.row)
+          await tx.run(
+            'INSERT INTO managed_batches (id, owner_id, source_digest, report_enc, created_at) VALUES ($1, $2, $3, $4, $5)',
+            [
+              report.batchId,
+              owner,
+              sourceDigest,
+              crypto.seal(report, context(owner, report.batchId, 'batch-report')),
+              timestamp,
+            ]
+          )
+          const eventId = randomUUID()
+          await tx.run(
+            'INSERT INTO managed_audit (id, owner_id, event_type, subject_id, detail_enc, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+            [
+              eventId,
+              owner,
+              'import.staged',
+              report.batchId,
+              crypto.seal(
+                {
+                  created: report.created,
+                  existing: report.existing,
+                  conflicts: report.conflicts,
+                  totalRows: report.totalRows,
+                },
+                context(owner, eventId, 'audit')
+              ),
+              timestamp,
+            ]
+          )
+          return report
+        })
+      )
+    },
+    async listAccounts(auth, { limit = 100, after = '' } = {}) {
+      if (
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 200 ||
+        typeof after !== 'string' ||
+        (after && !/^[a-f0-9-]{36}$/.test(after))
+      )
+        throw new ManagedError('INVALID_INPUT')
+      const owner = await authorize(auth)
+      const rows = await db.query(
+        'SELECT * FROM managed_accounts WHERE owner_id = $1 AND id > $2 ORDER BY id LIMIT $3',
+        [owner, after, limit + 1]
+      )
+      return {
+        accounts: rows.slice(0, limit).map(publicAccount),
+        nextCursor: rows.length > limit ? rows[limit - 1].id : null,
+      }
+    },
+    async getAccount(auth, id) {
+      const owner = await authorize(auth)
+      const row = await db.get('SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2', [
+        owner,
+        id,
+      ])
+      if (!row) throw new ManagedError('NOT_FOUND')
+      return publicAccount(row)
+    },
+    async getBatch(auth, id) {
+      const owner = await authorize(auth)
+      const row = await db.get(
+        'SELECT report_enc FROM managed_batches WHERE owner_id = $1 AND id = $2',
+        [owner, id]
+      )
+      if (!row) throw new ManagedError('NOT_FOUND')
+      return crypto.open(row.report_enc, context(owner, id, 'batch-report'))
+    },
+    async status(auth) {
+      const owner = await authorize(auth)
+      const settings = await db.get(
+        'SELECT version, write_paused, safe_mode FROM managed_owners WHERE owner_id = $1',
+        [owner]
+      )
+      const counts = await db.query(
+        'SELECT state, COUNT(*) AS count FROM managed_accounts WHERE owner_id = $1 GROUP BY state',
+        [owner]
+      )
+      return {
+        capabilities: { passiveImport: true, providerWrites: false },
+        writePaused: true, // No writer is enabled in this slice, even if a DB flag changes.
+        ownerWritePaused: settings ? settings.write_paused === 1 : true,
+        safeMode: settings ? settings.safe_mode === 1 : true,
+        version: settings?.version ?? null,
+        accounts: Object.fromEntries(
+          ['staged', 'active', 'offboarding'].map((state) => [
+            state,
+            counts.find((row) => row.state === state)?.count ?? 0,
+          ])
+        ),
+      }
+    },
+  })
+}

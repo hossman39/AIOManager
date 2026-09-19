@@ -3,6 +3,8 @@ import { test } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
 import { DB } from '../server/db.js'
+import { managedStorageContract, prepareManagedFixture } from './managed-contract.mjs'
+import { managedJobContract } from './managed-job-contract.mjs'
 
 const connectionString = process.env.AIO_TEST_POSTGRES_URL
 const options = { skip: !connectionString }
@@ -35,6 +37,13 @@ async function fixture(t) {
   await db.exec('CREATE TABLE sample (id TEXT PRIMARY KEY, value INTEGER NOT NULL)')
   return db
 }
+
+managedStorageContract('PostgreSQL managed storage', options, async (t) =>
+  prepareManagedFixture(await fixture(t))
+)
+managedJobContract('PostgreSQL durable jobs', options, async (t) =>
+  prepareManagedFixture(await fixture(t))
+)
 
 test('real PostgreSQL commits and rolls back on its checked-out connection', options, async (t) => {
   const db = await fixture(t)

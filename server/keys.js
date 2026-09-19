@@ -11,6 +11,8 @@ const retainedTables = [
   'managed_snapshots',
   'managed_batches',
   'managed_settings',
+  'managed_metadata',
+  'managed_owners',
 ]
 
 async function hasRetainedData(db) {

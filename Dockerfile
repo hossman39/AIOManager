@@ -21,6 +21,7 @@ RUN mkdir -p /app/data && chown node:node /app/data
 COPY --from=production-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
+COPY --from=build /app/shared ./shared
 COPY package.json ./
 
 ENV DATA_DIR=/app/data

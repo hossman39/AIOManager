@@ -10,6 +10,10 @@ import { fileURLToPath } from 'url'
 import fs from 'fs'
 import { encrypt, decrypt } from './crypto.js'
 import { loadServerKeys } from './keys.js'
+import { migrateManagedSchema } from './managed/schema.js'
+import { initializeManagedCrypto, equalSecret } from './managed/crypto.js'
+import { createManagedRepository } from './managed/repository.js'
+import { registerManagedRoutes } from './managed/routes.js'
 // let LZString import removed - obsolete
 
 // Construction does not bind a port, install signal handlers, or start jobs.
@@ -239,7 +243,7 @@ export async function buildServer(options = {}) {
     if (db.type === 'sqlite') {
       // SQLite Performance & Stability Optimizations
       await db.pragma('journal_mode = WAL')
-    await db.pragma('synchronous = FULL')
+      await db.pragma('synchronous = FULL')
       await db.pragma('temp_store = MEMORY')
       await db.pragma('cache_size = -32000') // 32MB cache
       await db.pragma('auto_vacuum = INCREMENTAL') // Keeps file small over time
@@ -315,6 +319,13 @@ export async function buildServer(options = {}) {
 
     // Execute schema creation
     await db.exec(schema)
+    await migrateManagedSchema(db)
+    const managedCrypto = await initializeManagedCrypto(db, keys)
+    const managedRepository = createManagedRepository({
+      db,
+      crypto: managedCrypto,
+      legacyKeys: FALLBACK_KEYS,
+    })
 
     // Migration: Add addon_list column if it doesn't exist (for existing databases)
     try {
@@ -461,6 +472,7 @@ export async function buildServer(options = {}) {
 
     // Register Gzip Compression (Reduces network payload size by ~80%)
     await fastify.register(fastifyCompress, { global: true })
+    await registerManagedRoutes(fastify, managedRepository)
 
     // Serve Static Files
     const distPath = options.staticDir || path.join(__dirname, '../dist')
@@ -587,7 +599,7 @@ export async function buildServer(options = {}) {
 
           // 1. Decrypt password for comparison (Silent migration fallback)
           const decryptedPassword = decrypt(row.password, FALLBACK_KEYS)
-          if (decryptedPassword !== password) {
+          if (!equalSecret(decryptedPassword, password)) {
             fastify.log.warn({ category: 'Sync' }, `[${id}] Unauthorized: Password mismatch.`)
             reply.status(401)
             return { error: 'Unauthorized: Invalid Password' }
@@ -609,8 +621,10 @@ export async function buildServer(options = {}) {
             const encryptedPass = encrypt(password, PRIMARY_KEY)
             const encryptedVal = encrypt(decryptedValueStr, PRIMARY_KEY)
             await db.run(
-              'UPDATE kv_store SET password = $1, value = $2, updated_at = $3 WHERE key = $4',
-              [encryptedPass, encryptedVal, Date.now(), id]
+              `UPDATE kv_store SET password = $1, value = $2, updated_at = $3
+               WHERE key = $4 AND password = $5
+               AND (value = $6 OR (value IS NULL AND $6 IS NULL))`,
+              [encryptedPass, encryptedVal, Date.now(), id, row.password, row.value]
             )
           }
 
@@ -1006,9 +1020,6 @@ export async function buildServer(options = {}) {
           return { error: 'Missing ID or Password header' }
         }
 
-        // Check existing
-        const row = await db.get('SELECT password FROM kv_store WHERE key = $1', [id])
-
         // SERVER-SIDE TIMESTAMPING (Single Source of Truth)
         const serverTime = new Date().toISOString()
         data.syncedAt = serverTime
@@ -1016,32 +1027,28 @@ export async function buildServer(options = {}) {
         const encryptedVal = encrypt(JSON.stringify(data), PRIMARY_KEY)
         const encryptedPass = encrypt(password, PRIMARY_KEY)
 
-        if (row) {
-          // Verify ownership (Decrypt legacy or fresh)
-          const decryptedPassword = decrypt(row.password, FALLBACK_KEYS)
-          if (decryptedPassword !== password) {
-            reply.status(401)
-            return { error: 'Unauthorized: Password mismatch' }
-          }
-
-          // Update (Always Save Encrypted)
-          await db.run(
-            `
-            UPDATE kv_store
-            SET value = $1, password = $2, updated_at = $3
-            WHERE key = $4
-        `,
-            [encryptedVal, encryptedPass, Date.now(), id]
-          )
-        } else {
-          // Claim (Always Save Encrypted)
-          await db.run(
-            `
-            INSERT INTO kv_store (key, value, password, updated_at)
-            VALUES ($1, $2, $3, $4)
-        `,
+        // A simultaneous claim may only win once. The losing request must
+        // authenticate against the committed identity, never overwrite it.
+        const authorized = await db.transaction(async (tx) => {
+          await tx.run(
+            `INSERT INTO kv_store (key, value, password, updated_at)
+            VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING`,
             [id, encryptedVal, encryptedPass, Date.now()]
           )
+          const row = await tx.get(
+            `SELECT password FROM kv_store WHERE key = $1${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
+            [id]
+          )
+          if (!equalSecret(decrypt(row.password, FALLBACK_KEYS), password)) return false
+          await tx.run(
+            'UPDATE kv_store SET value = $1, password = $2, updated_at = $3 WHERE key = $4',
+            [encryptedVal, encryptedPass, Date.now(), id]
+          )
+          return true
+        })
+        if (!authorized) {
+          reply.status(401)
+          return { error: 'Unauthorized: Password mismatch' }
         }
 
         return { success: true, syncedAt: serverTime }
@@ -1061,25 +1068,27 @@ export async function buildServer(options = {}) {
         return { error: 'Missing ID or Password header' }
       }
 
-      const row = await db.get('SELECT password FROM kv_store WHERE key = $1', [id])
-
-      if (!row) {
-        fastify.log.warn({ category: 'Server' }, `DELETE failed: ID ${id} not found`)
-        reply.status(404)
-        return { error: 'Not found' }
-      }
-
-      const decryptedPassword = decrypt(row.password, FALLBACK_KEYS)
-      if (decryptedPassword !== password) {
-        fastify.log.warn({ category: 'Server' }, `DELETE failed: Password mismatch for ID ${id}`)
-        reply.status(401)
-        return { error: 'Unauthorized: Invalid Password' }
-      }
-
-      fastify.log.info({ category: 'Server' }, `Deleting account data for ID: ${id}`)
-      await db.run('DELETE FROM kv_store WHERE key = $1', [id])
-
-      return { success: true }
+      const result = await db.transaction(async (tx) => {
+        const row = await tx.get(
+          `SELECT password FROM kv_store WHERE key = $1${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
+          [id]
+        )
+        if (!row) return { status: 404, body: { error: 'Not found' } }
+        if (!equalSecret(decrypt(row.password, FALLBACK_KEYS), password)) {
+          return { status: 401, body: { error: 'Unauthorized: Invalid Password' } }
+        }
+        if (await tx.get('SELECT 1 AS present FROM managed_owners WHERE owner_id = $1', [id])) {
+          return {
+            status: 409,
+            body: {
+              error: 'This login owns managed data. It cannot be deleted through legacy sync.',
+            },
+          }
+        }
+        await tx.run('DELETE FROM kv_store WHERE key = $1', [id])
+        return { status: 200, body: { success: true } }
+      })
+      return reply.code(result.status).send(result.body)
     })
 
     // PROXY: Manifest Rewriter (Sidekick Mode)

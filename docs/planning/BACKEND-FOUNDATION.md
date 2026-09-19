@@ -24,9 +24,14 @@ The static plugin's [compatibility table](https://github.com/fastify/fastify-sta
 
 - Node 24.21.0 is selected from the official [LTS release](https://nodejs.org/en/blog/release/v24.21.0); the Node Bookworm slim image is pinned to the retrieved multi-platform digest. All stages share its runtime/native-module ABI. The runtime is slim/non-root (UID 1000), not the old distroless image. Existing volume permissions must permit this UID before deployment.
 - Builds use the lockfile. Only the SQLite native dependency's install scripts are explicitly run; compiler packages stay out of the runtime stage. Docker context excludes keys, databases, and local data volumes.
-- CI checks Windows/Linux, a disposable PostgreSQL service, and no-egress AMD64/ARM64 containers. Hosted results are pending until the branch is tested there. Docker and PostgreSQL executables are absent locally.
+- CI checks Windows/Linux, a disposable PostgreSQL service, and no-egress AMD64/ARM64 containers. All five jobs passed for `be5d9de` in [run 35472588828](https://github.com/hossman39/AIOManager/actions/runs/35472588828). Docker and PostgreSQL executables are absent locally.
 - The inherited upstream Docker Hub destination and automatic push/tag publishing were removed. Publishing is a separate manual workflow on main after checks, defaults to no push, targets only this fork's GHCR namespace, and uses commit-specific tags. No image has been published or deployed.
 
 ## Local evidence so far
 
-71 tests pass; 2 real PostgreSQL tests are skipped without a test service. Native SQLite, rollback, 100 concurrent transaction updates, file-backed restart, key loss, server lifecycle, existing sync authentication, and addon/migration compatibility are exercised. Existing typecheck/lint/build checks are rerun after changes. Hosted PostgreSQL/container checks, managed ownership enforcement, job crash recovery, real Stremio/Android behavior, and production restore remain release gates.
+At this checkpoint, 71 tests passed locally; 2 PostgreSQL tests ran successfully in
+hosted CI. Native SQLite, rollback, 100 concurrent transaction updates, file-backed
+restart, key loss, server lifecycle, existing sync authentication, and addon/migration
+compatibility were exercised. Typecheck/lint/build also passed on Windows/Linux.
+Newer managed persistence evidence is tracked in [PROGRESS.md](PROGRESS.md); real
+Stremio/Android behavior and production restore remain release gates.
