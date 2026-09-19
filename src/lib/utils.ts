@@ -234,7 +234,7 @@ export function mergeAddons(localAddons: AddonDescriptor[], remoteAddons: AddonD
         // Local customName is already in mergedMetadata from the logic above or existing state
       }
 
-      let finalManifest = useLocalManifest ? localManifest : remoteManifest;
+      const finalManifest = useLocalManifest ? localManifest : remoteManifest;
 
       finalAddons.push({
         ...remoteAddon,

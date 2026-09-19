@@ -1,0 +1,33 @@
+# Foundation tests
+
+Run on Node 24.14.0 (the verified local runtime):
+
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm rebuild better-sqlite3 --ignore-scripts=false
+npm run typecheck
+npm run lint
+npm test
+npm run build
+```
+
+The suite uses Node's built-in test runner and pinned `tsx` for TypeScript/path aliases, without upgrading Vite. `typecheck` checks application and TypeScript test code. CI uses Node 24.21.0 on Windows/Linux; local checks so far use 24.14.0. Hosted results must be recorded separately.
+
+All credentials and addon URLs are synthetic. Each test file imports `helpers.ts`, which rejects accidental fetch/http/https requests. Provider contract tests replace the transport or collection-set method with local mocks; no Stremio accounts are created or modified.
+
+## Boundaries
+
+- `addon-compatibility.test.ts`: enabled-only payloads, saved disabled records, customization, protected addons, URL identity, Cinemeta options, and respecting ordinary client removals during refresh.
+- `addon-suspension.test.ts`: expiry projection retains all configuration, suppresses every effective enabled flag, and lifts suspension without changing saved manual preferences. JSON round trips model serialization only, not database crash recovery.
+- `account-auth.test.ts`: existing login/registration API contracts and failures; not an end-to-end onboarding/device test.
+- `credential-import.test.ts`: passive credential allowlist, export envelopes, exact passwords, duplicate/conflict handling, redacted errors, and resource limits. It does not stage records or authenticate clients.
+- `database.test.mjs`: native SQLite transactions, rollback, concurrent isolation, persistence, and PostgreSQL client-lifecycle contracts with a fake pool.
+- `server-lifecycle.test.mjs`: isolated Fastify startup/shutdown, legacy encrypted sync, key loss/restart, and static-serving contracts. Only loopback listeners and synthetic temporary databases are used.
+- `postgres-integration.test.mjs`: real PostgreSQL rollback/concurrency, enabled only by `AIO_TEST_POSTGRES_URL` pointing at a loopback database named `aiomanager_test`. These tests are skipped locally when no test service exists and run in a dedicated CI service.
+- `scripts/container-smoke.mjs`: CI-only container checks, no egress or host data mounts; non-root operation, native SQLite, encrypted sync, and restart recovery on AMD64/ARM64.
+
+Successful import results contain plaintext passwords transiently. Never log them or use production exports as fixtures. Durable staging must encrypt credentials before persistence.
+
+`applyAddonSuspension` is a projection over retained configuration. Never save the projection over configured enabled preferences. The worker must persist configuration and suspension state separately and use the projection for display/sync; otherwise renewal could not distinguish a manual disable from expiry.
+
+The managed queue, ownership gates, persistent expiry clock, New York datetime input, import wizard, group/personal UI, offboarding, daily backups, and Android/provider verification remain implementation work. The targeted `better-sqlite3` rebuild is required for native tests; a scripts-disabled install alone is insufficient. See [release gates](../docs/planning/VERIFICATION.md).

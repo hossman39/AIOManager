@@ -33,7 +33,7 @@ export function Footer() {
     }
 
     if (!isDev) checkUpdate()
-  }, [isDev, version])
+  }, [isDev, version, build])
 
   return (
     <>

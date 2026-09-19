@@ -12,9 +12,12 @@
   "dependencies": {
     "@fastify/compress": "^8.3.1",
     "@fastify/cors": "^11.2.0",
-    "@fastify/static": "^9.0.0",
+    "@fastify/static": "10.1.4",
+    "axios": "1.20.0",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^16.6.1",
-    "fastify": "^5.7.4"
+    "fastify": "5.12.5",
+    "pg": "^8.18.0",
+    "pino-pretty": "^13.1.3"
   }
 }

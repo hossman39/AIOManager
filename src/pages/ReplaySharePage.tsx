@@ -39,7 +39,7 @@ function decodeShareToken(token: string): { data: ReplayData; userName?: string 
         if (Array.isArray(payload) && (payload[0] === 5 || payload[0] === 6)) {
             const isLatest = payload[0] === 6
             const [
-                _v, y, u, tt, th, tg, ls, apm, dp, tud, p, pd,
+                , y, u, tt, th, tg, ls, apm, dp, tud, p, pd,
                 tp, t, ds, mt, hg, g, hpa, mb, m, hd, dd, yoy, ph, pdb
             ] = payload
 
@@ -146,22 +146,22 @@ function decodeShareToken(token: string): { data: ReplayData; userName?: string 
     }
 }
 
+const sections = [
+    { id: 'hero', label: 'Overview' },
+    { id: 'glance', label: 'At a Glance' },
+    { id: 'stats', label: 'Stats' },
+    { id: 'titles', label: 'Top Titles' },
+    { id: 'months', label: 'Timeline' },
+    { id: 'milestones', label: 'Milestones' },
+    { id: 'insights', label: 'Insights' },
+    { id: 'share', label: 'Share Card' },
+]
+
 export function ReplaySharePage() {
     const { token } = useParams<{ token: string }>()
     const [decoded, setDecoded] = useState<{ data: ReplayData; userName?: string } | null | 'error' | 'loading'>('loading')
     const [activeSection, setActiveSection] = useState('hero')
     const scrollContainerRef = useRef<HTMLDivElement>(null)
-
-    const sections = [
-        { id: 'hero', label: 'Overview' },
-        { id: 'glance', label: 'At a Glance' },
-        { id: 'stats', label: 'Stats' },
-        { id: 'titles', label: 'Top Titles' },
-        { id: 'months', label: 'Timeline' },
-        { id: 'milestones', label: 'Milestones' },
-        { id: 'insights', label: 'Insights' },
-        { id: 'share', label: 'Share Card' },
-    ]
 
     const scrollToSection = (id: string) => {
         document.getElementById(`section-${id}`)?.scrollIntoView({
