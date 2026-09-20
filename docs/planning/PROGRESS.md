@@ -27,10 +27,12 @@ verified removal passed. Two stale status messages found during rehearsal were
 corrected. The restore CLI was also executed against a fresh directory, then the
 restored application was booted and its authenticated account read successfully.
 
-Runtime checkpoint `e2ef0f1` passed all five hosted jobs in
-[run 35512509290](https://github.com/hossman39/AIOManager/actions/runs/35512509290):
-275 tests each on Windows and Linux, all 105 PostgreSQL cases, and AMD64/ARM64
-container smoke checks. No image publication or production deployment ran.
+Final testing checkpoint `ad0373c` passed all five hosted jobs in
+[run 35513062652](https://github.com/hossman39/AIOManager/actions/runs/35513062652):
+276 tests each on Windows and Linux, all 105 PostgreSQL cases, and AMD64/ARM64
+container smoke checks. Typecheck, lint, production builds and dependency audits
+also passed. This includes the offline restore CLI rehearsal and final status
+message corrections. No image publication or production deployment ran.
 
 Remaining acceptance is on dedicated Stremio accounts/Android, the owner's actual
 export and VPS, and the production soak/release gates. The test instance has a
