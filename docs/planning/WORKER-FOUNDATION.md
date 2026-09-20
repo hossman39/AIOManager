@@ -40,6 +40,8 @@ gated by [VERIFICATION.md](VERIFICATION.md).
   Default request spacing is 500ms, timeout 10 seconds, and verification is limited
   to two readbacks. Aborting a request does not release the slot until that request
   settles. Shutdown aborts and drains the outstanding operation.
+  Repeated shutdown calls are idempotent and cannot release a replacement runner's
+  ownership guard.
 - Retry deadlines, fixed error codes and attempts are durable. Exponential backoff
   has jitter and a five-attempt limit; invalid credentials/identity/data require
   attention. Retry-After supports seconds and HTTP dates. Three transport failures

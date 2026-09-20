@@ -90,6 +90,7 @@ export function createManagedWorker({
   workers.add(db)
   const shutdown = new AbortController()
   let running = null,
+    closing = null,
     closed = false,
     failures = 0,
     blockedUntil = 0,
@@ -231,14 +232,15 @@ export function createManagedWorker({
         })
       return running
     },
-    async close() {
-      closed = true
-      shutdown.abort()
-      try {
-        await running
-      } finally {
-        workers.delete(db)
+    close() {
+      if (!closing) {
+        closed = true
+        shutdown.abort()
+        closing = Promise.resolve(running).finally(() => {
+          workers.delete(db)
+        })
       }
+      return closing
     },
   })
 }

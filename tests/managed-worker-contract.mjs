@@ -472,7 +472,10 @@ export function managedWorkerContract(prefix, options, fixture) {
       assert.equal((await first).state, 'verified')
       assert.equal(s.calls.filter((call) => call.method === 'set').length, 1)
       await worker.close()
-      assert.equal((await s.makeWorker().runOnce()).state, 'idle')
+      const replacement = s.makeWorker()
+      await worker.close()
+      assert.throws(() => s.makeWorker(), { code: 'INVALID_INPUT' })
+      assert.equal((await replacement.runOnce()).state, 'idle')
     }
   )
 
