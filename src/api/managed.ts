@@ -57,6 +57,7 @@ const accountSchema = z
       })
       .nullable(),
     safeMode: z.boolean().nullable(),
+    suspendedAt: z.number().int().nonnegative().nullable().default(null),
     appliedVersion: z.number().int().nullable(),
     appliedTarget: z.enum(['active', 'suspended', 'offboard']).nullable(),
     verifiedAt: z.number().int().nullable(),

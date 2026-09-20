@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
+import { currentAccountTarget, observeSuspension } from './entitlement.js'
+import { readExecutionPolicy, checkedExecutionPlan } from './execution.js'
+export { currentAccountTarget } from './entitlement.js'
 
 const causes = new Set([
   'activation',
@@ -25,20 +28,12 @@ const retryCodes = new Set([
   'VERIFICATION_MISMATCH',
   'MANIFEST_UNAVAILABLE',
   'DATA_UNREADABLE',
+  'WRITE_PAUSED',
+  'INVALID_STATE',
+  'IDENTITY_MISMATCH',
 ])
 const lockSuffix = (tx) => (tx.type === 'postgres' ? ' FOR UPDATE' : '')
 const context = (owner, id, purpose) => ({ owner, id, purpose })
-
-export function currentAccountTarget(account, timestamp) {
-  if (account.state === 'staged') return null
-  if (account.state === 'offboarding') return 'offboard'
-  if (account.state !== 'active') throw new ManagedError('INVALID_STATE')
-  if (account.lifetime === 1) {
-    if (account.expiry_at !== null) throw new ManagedError('INVALID_STATE')
-    return 'active'
-  }
-  return account.expiry_at !== null && account.expiry_at <= timestamp ? 'suspended' : 'active'
-}
 
 /**
  * Internal persistence API, not a provider worker or an HTTP authorization layer.
@@ -60,6 +55,7 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
 
   async function enqueueInTransaction(tx, account, cause, timestamp) {
     if (!causes.has(cause)) throw new ManagedError('INVALID_INPUT')
+    await observeSuspension(tx, account, timestamp)
     const target = currentAccountTarget(account, timestamp)
     if (!target) throw new ManagedError('INVALID_STATE')
     const priority =
@@ -100,6 +96,7 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
       job.lease_until <= timestamp
     )
       throw new ManagedError('LEASE_LOST')
+    await observeSuspension(tx, account, timestamp)
     return { job, account }
   }
 
@@ -130,9 +127,60 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
     )
   }
 
+  const planContext = (job) => context(job.owner_id, job.id, 'execution-plan')
+  async function checkPolicyStamp(tx, job, account, stamp) {
+    const policy = await readExecutionPolicy(tx, account, crypto, job.target)
+    if (!equalSecret(policy.stamp, stamp)) throw new ManagedError('VERSION_CONFLICT')
+    return policy
+  }
+
+  async function reschedulePolicy(tx, job, account, timestamp) {
+    if (!matchesPolicy(job, account, timestamp)) return supersede(tx, job, account, timestamp)
+    await tx.run(
+      `UPDATE managed_jobs SET state = 'retrying', execution_enc = NULL,
+      lease_token = NULL, lease_until = NULL, due_at = $1, updated_at = $1,
+      error_code = 'OUTCOME_UNKNOWN' WHERE id = $2`,
+      [timestamp, job.id]
+    )
+    return { state: 'retrying' }
+  }
+
   return Object.freeze({
     // Policy services use this within the SAME transaction as a policy update.
     enqueueInTransaction,
+    async readExecution(claim) {
+      return db.transaction(async (tx) => {
+        const timestamp = clock()
+        const { job, account } = await leased(tx, claim, timestamp)
+        await ensureUnpaused(tx, account.owner_id)
+        if (!matchesPolicy(job, account, timestamp)) return supersede(tx, job, account, timestamp)
+        const policy = await readExecutionPolicy(tx, account, crypto, job.target)
+        const stored = job.execution_enc
+          ? checkedExecutionPlan(crypto.open(job.execution_enc, planContext(job)))
+          : null
+        return {
+          state: 'current',
+          policy,
+          plan: stored && equalSecret(stored.stamp, policy.stamp) ? stored : null,
+        }
+      })
+    },
+    async checkDispatch(claim, stamp) {
+      return db.transaction(async (tx) => {
+        const timestamp = clock()
+        const { job, account } = await leased(tx, claim, timestamp)
+        await ensureUnpaused(tx, account.owner_id)
+        if (!matchesPolicy(job, account, timestamp)) throw new ManagedError('VERSION_CONFLICT')
+        await checkPolicyStamp(tx, job, account, stamp)
+      })
+    },
+    async reschedulePolicy(claim) {
+      return db.transaction(async (tx) => {
+        const timestamp = clock()
+        const { job, account } = await leased(tx, claim, timestamp)
+        return reschedulePolicy(tx, job, account, timestamp)
+      })
+    },
     async enqueue({ owner, accountId, expectedPolicy, cause }) {
       return db.transaction(async (tx) => {
         const account = await lockedAccount(tx, owner, accountId)
@@ -158,6 +206,7 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
             [timestamp]
           )
           if (!account) return null
+          await observeSuspension(tx, account, timestamp)
           const job = await tx.get(
             `SELECT * FROM managed_jobs WHERE account_id = $1 AND state IN ('pending', 'retrying') AND due_at <= $2
             ORDER BY priority DESC, created_at, id LIMIT 1${lockSuffix(tx)}`,
@@ -182,6 +231,21 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
           }
         }
         return null
+      })
+    },
+    async scanExpiry({ limit = 100 } = {}) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200)
+        throw new ManagedError('INVALID_INPUT')
+      return db.transaction(async (tx) => {
+        const timestamp = clock()
+        const accounts = await tx.query(
+          `SELECT * FROM managed_accounts WHERE state = 'active' AND lifetime = 0
+          AND expiry_at IS NOT NULL AND suspended_at IS NULL AND expiry_at <= $1
+          ORDER BY expiry_at, id LIMIT $2${tx.type === 'postgres' ? ' FOR UPDATE SKIP LOCKED' : ''}`,
+          [timestamp, limit]
+        )
+        for (const account of accounts) await enqueueInTransaction(tx, account, 'expiry', timestamp)
+        return accounts.length
       })
     },
     async recoverExpired() {
@@ -219,7 +283,7 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
         return until
       })
     },
-    async beginWrite(claim, beforeCollection) {
+    async beginWrite(claim, beforeCollection, executionPlan) {
       return db.transaction(async (tx) => {
         const timestamp = clock()
         const { job, account } = await leased(tx, claim, timestamp)
@@ -227,6 +291,8 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
         if (!matchesPolicy(job, account, timestamp)) throw new ManagedError('VERSION_CONFLICT')
         // Active setup must have a group; an expired account can still be disabled.
         if (job.target === 'active' && !account.group_id) throw new ManagedError('INVALID_STATE')
+        const plan = executionPlan === undefined ? null : checkedExecutionPlan(executionPlan)
+        if (plan) await checkPolicyStamp(tx, job, account, plan.stamp)
         const digest = collectionDigest(beforeCollection, account)
         if (
           await tx.get('SELECT id FROM managed_snapshots WHERE job_id = $1 AND attempt = $2', [
@@ -258,10 +324,27 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
           timestamp,
           job.id,
         ])
+        if (plan) {
+          await tx.run('UPDATE managed_jobs SET execution_enc = $1 WHERE id = $2', [
+            crypto.seal(plan, planContext(job)),
+            job.id,
+          ])
+          await tx.run(
+            'UPDATE managed_accounts SET configuration_enc = $1 WHERE owner_id = $2 AND id = $3',
+            [
+              crypto.seal(
+                plan.configuration,
+                context(account.owner_id, account.id, 'configuration')
+              ),
+              account.owner_id,
+              account.id,
+            ]
+          )
+        }
         return { snapshotId }
       })
     },
-    async completeVerified(claim, { expected, observed }) {
+    async completeVerified(claim, { expected, observed, plan: executionPlan }) {
       return db.transaction(async (tx) => {
         const timestamp = clock()
         const { job, account } = await leased(tx, claim, timestamp)
@@ -272,6 +355,30 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
         // Suspension/offboarding must verify an empty *active* provider collection.
         if (job.target !== 'active' && observed.length !== 0)
           throw new ManagedError('INVALID_STATE')
+        if (executionPlan !== undefined) {
+          const plan = checkedExecutionPlan(executionPlan)
+          const policy = await readExecutionPolicy(tx, account, crypto, job.target)
+          if (!equalSecret(policy.stamp, plan.stamp))
+            return reschedulePolicy(tx, job, account, timestamp)
+          if (
+            !equalSecret(
+              collectionDigest(plan.expected, account),
+              collectionDigest(expected, account)
+            )
+          )
+            throw new ManagedError('INVALID_STATE')
+          await tx.run(
+            'UPDATE managed_accounts SET configuration_enc = $1 WHERE owner_id = $2 AND id = $3',
+            [
+              crypto.seal(
+                plan.configuration,
+                context(account.owner_id, account.id, 'configuration')
+              ),
+              account.owner_id,
+              account.id,
+            ]
+          )
+        }
         await tx.run(
           `UPDATE managed_jobs SET state = 'verified', lease_token = NULL, lease_until = NULL, error_code = NULL, updated_at = $1 WHERE id = $2`,
           [timestamp, job.id]

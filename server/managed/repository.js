@@ -136,6 +136,7 @@ export function createManagedRepository({
               timezone: row.expiry_timezone,
             },
       safeMode: row.safe_mode === null ? null : row.safe_mode === 1,
+      suspendedAt: row.suspended_at ?? null,
       appliedVersion: row.applied_version,
       appliedTarget: row.applied_target,
       verifiedAt: row.verified_at,
@@ -183,12 +184,17 @@ export function createManagedRepository({
             throw new ManagedError('VERSION_CONFLICT')
           if (account.state === 'offboarding') throw new ManagedError('INVALID_STATE')
           const lifetime = change.mode === 'lifetime' ? 1 : 0
-          if (account.lifetime === lifetime && account.expiry_at === (expiry?.at ?? null))
+          const suspendedAt = lifetime === 1 || expiry.at > timestamp ? null : account.suspended_at
+          if (
+            account.lifetime === lifetime &&
+            account.expiry_at === (expiry?.at ?? null) &&
+            account.suspended_at === suspendedAt
+          )
             return { account: publicAccount(account), jobId: null, replayed: false }
           const result = await tx.run(
             `UPDATE managed_accounts SET lifetime = $1, expiry_at = $2, expiry_local = $3,
             expiry_offset = $4, expiry_timezone = $5, record_version = record_version + 1, policy_version = policy_version + 1,
-            updated_at = $6 WHERE owner_id = $7 AND id = $8 AND record_version = $9`,
+            updated_at = $6, suspended_at = $10 WHERE owner_id = $7 AND id = $8 AND record_version = $9`,
             [
               lifetime,
               expiry?.at ?? null,
@@ -199,6 +205,7 @@ export function createManagedRepository({
               owner,
               id,
               change.expectedVersion,
+              suspendedAt,
             ]
           )
           if (result.changes !== 1) throw new ManagedError('VERSION_CONFLICT')

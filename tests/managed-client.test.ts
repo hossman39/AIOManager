@@ -182,6 +182,7 @@ const publicAccount = {
   version: 2,
   policyVersion: 2,
   expiry: null,
+  suspendedAt: null,
   safeMode: null,
   appliedVersion: null,
   appliedTarget: null,

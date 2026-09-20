@@ -259,7 +259,7 @@ export function managedJobContract(prefix, options, fixture) {
       const disabling = await jobs.claim()
       await jobs.beginWrite(disabling, before)
       await db.run(
-        'UPDATE managed_accounts SET expiry_at = expiry_at + 86400000, policy_version = 2 WHERE id = $1',
+        'UPDATE managed_accounts SET expiry_at = expiry_at + 86400000, suspended_at = NULL, policy_version = 2 WHERE id = $1',
         [ids[0]]
       )
       assert.equal(

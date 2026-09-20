@@ -8,6 +8,7 @@ import { managedJobContract } from './managed-job-contract.mjs'
 import { managedMembershipContract } from './managed-membership-contract.mjs'
 import { managedGroupsContract } from './managed-groups-contract.mjs'
 import { managedPublicationContract } from './managed-publication-contract.mjs'
+import { managedWorkerContract } from './managed-worker-contract.mjs'
 
 const connectionString = process.env.AIO_TEST_POSTGRES_URL
 const options = { skip: !connectionString }
@@ -55,6 +56,9 @@ managedGroupsContract('PostgreSQL group configuration', options, async (t) =>
 )
 managedPublicationContract('PostgreSQL group publication', options, async (t) =>
   prepareManagedFixture(await fixture(t))
+)
+managedWorkerContract('PostgreSQL managed execution', options, async (t, fixtureOptions) =>
+  prepareManagedFixture(await fixture(t), fixtureOptions)
 )
 
 test('real PostgreSQL commits and rolls back on its checked-out connection', options, async (t) => {

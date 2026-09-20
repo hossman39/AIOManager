@@ -60,6 +60,7 @@ const definitions = {
   ],
   WRITE_PAUSED: [409, 'Managed writes are paused.'],
   LEASE_LOST: [409, 'The job lease is no longer current.'],
+  IDENTITY_MISMATCH: [409, 'The provider session does not match the enrolled account.'],
   DATA_UNREADABLE: [503, 'Managed data cannot be decrypted. Restore the matching key and data.'],
 }
 

@@ -40,6 +40,8 @@ transport. No Stremio accounts are created or modified.
 - `new-york-expiry.test.mjs`: calendar validation, spring gaps, repeated fall times, explicit offsets, and host-timezone independence.
 - `managed-membership.test.mjs` / `managed-membership-contract.mjs`: additive schema upgrade, explicit lifetime versus unset, exact dated cutoffs, concurrent/idempotent edits, renewal/expiry jobs, saved configuration retention, and full transaction rollback.
 - `managed-jobs.test.mjs` / `managed-job-contract.mjs`: durable claims, pause, lease recovery, per-attempt encrypted snapshots, atomic write intent, stale completion, expiry/renewal races, and file-backed restart. No remote worker is enabled by these tests.
+- `managed-worker.test.mjs` / `managed-worker-contract.mjs`: injected-provider execution on both engines, exact persisted plans/readback, no-op/lost-response recovery, identity/data rejection, pause, policy races, retry/circuit/request bounds, monotonic expiry observation, migration/rollback, a synthetic 100-account cohort and file-backed restart. Stalled requests retain the local runner until settlement. No real network adapter or deployment-wide writer lock is enabled.
+- `managed-projection.test.mjs`: group/personal layering, exact URLs, safe-mode anchors, saved disabled preferences, expiry retention, all Cinemeta option combinations, and Retry-After parsing.
 - `postgres-integration.test.mjs`: real PostgreSQL rollback/concurrency and the same managed storage/job/membership/group/publication contract suites, enabled only by `AIO_TEST_POSTGRES_URL` pointing at a loopback database named `aiomanager_test`. These tests are skipped locally when no test service exists and run in a dedicated CI service.
 - `scripts/container-smoke.mjs`: CI-only container checks, no egress or host data mounts; non-root operation, native SQLite, encrypted sync, and restart recovery on AMD64/ARM64.
 
@@ -52,8 +54,8 @@ rehearsals; see [membership evidence](../docs/planning/MEMBERSHIPS.md). Repeat w
 `node scripts/ui-rehearsal.mjs --seed-membership`, then `stop` to remove only its
 temporary test data. Native OS picker interaction still needs hands-on checking.
 
-Provider execution and all legacy-writer gates, persistent expiry scanning,
-activation, offboarding, daily backups,
+Native provider integration and all legacy-writer gates, deployment-wide ownership,
+scheduled expiry polling/rechecks, activation, offboarding, daily backups,
 and Android/provider verification remain implementation work. The targeted
 `better-sqlite3` rebuild is required for native tests; a scripts-disabled install
 alone is insufficient. See [release gates](../docs/planning/VERIFICATION.md).

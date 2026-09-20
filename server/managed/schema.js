@@ -165,6 +165,20 @@ CREATE INDEX managed_audit_owner ON managed_audit (owner_id, created_at DESC);
     sql: `ALTER TABLE managed_accounts ADD COLUMN lifetime INTEGER NOT NULL DEFAULT 0
       CHECK (lifetime IN (0, 1) AND (lifetime = 0 OR expiry_at IS NULL));`,
   }),
+  Object.freeze({
+    version: 3,
+    name: 'durable-suspension-and-execution-plans',
+    sql: `ALTER TABLE managed_accounts ADD COLUMN suspended_at BIGINT;
+ALTER TABLE managed_jobs ADD COLUMN execution_enc TEXT;
+CREATE INDEX managed_accounts_unobserved_expiry ON managed_accounts (expiry_at, id)
+  WHERE state = 'active' AND lifetime = 0 AND expiry_at IS NOT NULL AND suspended_at IS NULL;
+UPDATE managed_accounts SET suspended_at = COALESCE(verified_at, updated_at)
+  WHERE state = 'active' AND lifetime = 0 AND expiry_at IS NOT NULL
+  AND ((applied_target = 'suspended' AND applied_version = policy_version)
+    OR EXISTS (SELECT 1 FROM managed_jobs j WHERE j.account_id = managed_accounts.id
+      AND j.policy_version = managed_accounts.policy_version AND j.target = 'suspended'
+      AND j.state <> 'superseded'));`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

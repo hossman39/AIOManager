@@ -33,7 +33,7 @@ export function managedMembershipContract(prefix, options, fixture) {
       await migrateManagedSchema(db)
       assert.deepEqual(
         await db.query('SELECT * FROM managed_accounts ORDER BY id'),
-        before.map((row) => ({ ...row, lifetime: 0 }))
+        before.map((row) => ({ ...row, lifetime: 0, suspended_at: null }))
       )
       assert.deepEqual(
         await db.get('SELECT * FROM managed_schema_migrations WHERE version = 1'),
@@ -222,7 +222,10 @@ export function managedMembershipContract(prefix, options, fixture) {
       const lifetime = await repository.setMembership(
         firstAuth,
         ids[0],
-        { mode: 'lifetime', expectedVersion: 1 },
+        {
+          mode: 'lifetime',
+          expectedVersion: (await repository.getAccount(firstAuth, ids[0])).version,
+        },
         randomUUID()
       )
       assert.equal(lifetime.account.membershipType, 'lifetime')

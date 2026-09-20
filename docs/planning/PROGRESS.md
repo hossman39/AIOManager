@@ -19,6 +19,7 @@ Updated 2026-09-20. These are foundation increments, not a deployable managed-gr
 - Added group publication persistence: expiring previews, immutable revisions, atomic cohort/job creation, retry-safe replay, and recorded deployment progress. The read-only manifest adapter, authenticated HTTP routes and typed client are connected; provider execution remains disabled.
 - Added group authoring, preview/publish, passive bulk assignment and personal-addon editors. Metadata, catalogs, Cinemeta choices, exact URLs, enabled/protected flags and order remain editable. Retry freezes the original operation; stale edits require reload. A single navigation guard covers independent managed editors, pending imports/memberships, browser history and explicit logout. See [GROUP-EDITOR.md](GROUP-EDITOR.md).
 - Added owner-scoped discovery of the published group's recorded rollout, including encrypted restart recovery. UI selection/reload does not rely on a remembered publish response; missing published data fails closed.
+- Added an internal injected-provider execution engine, encrypted plans committed with snapshots/write intent, bounded requests/retries, exact readback, and restart reconciliation. Indexed expiry observation now persists suspension through clock rollback; renewal explicitly clears it. See [WORKER-FOUNDATION.md](WORKER-FOUNDATION.md). The application still starts no managed writer or expiry timer.
 
 ## Current local evidence
 
@@ -55,6 +56,15 @@ also passed all five hosted jobs, including its 72 PostgreSQL cases, in
 [run 35493646398](https://github.com/hossman39/AIOManager/actions/runs/35493646398).
 No image publication or production deployment ran.
 
+The execution/expiry foundation passes 256 local tests, with 95 PostgreSQL cases
+assigned to hosted execution. Typecheck, lint, build and both production dependency
+audits pass (zero audit findings). Coverage includes encrypted execution-plan
+restart recovery, lost responses, aborts beyond a lease, expiry/renewal races,
+clock rollback, all Cinemeta option combinations, and a synthetic 100-account
+scan/execution cohort. The existing build warnings remain. No dependency change,
+live provider call, activation, scheduler startup or deployment is included. See
+[WORKER-FOUNDATION.md](WORKER-FOUNDATION.md) for the integration boundary.
+
 ## First-increment evidence (historical)
 
 Local Windows / Node 24.14.0 / npm 11.9.0:
@@ -72,10 +82,10 @@ The first lockfile regeneration removed three stale packages absent from the exi
 ## Next engineering work and release blockers
 
 1. Verify each new increment in hosted CI. Keep publishing manual/fork-owned; no image has been published. Dated/lifetime membership controls are implemented, not live expiry enforcement.
-2. Implement single-writer provider execution, bounded requests, retry policy/circuit breaker, and every existing writer's ownership/expiry gate. The tested internal job store is not sufficient by itself to activate clients.
+2. Integrate the tested execution engine with deployment-wide single-writer ownership, a bounded native provider adapter, shared budgets and every existing writer's ownership/expiry gate. The injected runner and job store do not by themselves authorize activation.
 3. Connect activation to the tested migration, membership and group screens. Verify the owner's actual export locally; never request client passwords in chat.
-4. Implement first-sync safe-mode execution and effective group/personal/Cinemeta projection, preserving existing customization, disabled preferences and deliberate new-account creation. The authoring screens record intent, not verified provider effects.
-5. Connect the tested membership policy to indexed expiry scanning, persisted suspension, an Expired view, and verified offboarding. No addon deletion is an expiry operation.
+4. Connect first-sync choices to the tested safe-mode/group/personal/Cinemeta projection, preserving existing customization, disabled preferences and deliberate new-account creation. The authoring screens record intent, not verified provider effects.
+5. Connect indexed expiry observation and persisted suspension to startup/periodic polling, bounded expiry rechecks, an Expired view, and verified offboarding. No addon deletion is an expiry operation.
 6. Prove backup restoration, provider/Android contracts, concurrent changes, restart recovery, and 40/100-account load plus soak behavior before selecting a live pilot.
 
 The [verification plan](VERIFICATION.md) remains the release authority. These unit tests do not establish zero bugs, complete migration, durable expiry, or real-device behavior.
