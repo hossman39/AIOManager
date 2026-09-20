@@ -138,7 +138,10 @@ function apiBase(serverUrl: string) {
     const parsed = new URL(value)
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password)
       throw new Error()
-    return parsed.href.replace(/\/+$/, '')
+    // The existing sync store saves an absolute server root and appends /api.
+    // Also tolerate an explicit /api URL without appending it twice.
+    const base = parsed.href.replace(/\/+$/, '')
+    return parsed.pathname.replace(/\/+$/, '').endsWith('/api') ? base : `${base}/api`
   } catch {
     throw new ManagedApiError('INVALID_SERVER')
   }

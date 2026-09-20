@@ -68,6 +68,8 @@ not a claim that Stremio has synchronized.
   database is opened. `stop` or the 15-minute timeout removes only its own validated
   temporary directory.
 
-Hosted database/container results must be recorded separately. Real provider
+All hosted Windows/Linux, 37 PostgreSQL cases, and AMD64/ARM64 container checks
+passed for `5b79c74` in [run 35484284157](https://github.com/hossman39/AIOManager/actions/runs/35484284157).
+Real provider
 enforcement, Android behavior, group publication, every legacy-writer gate, backup
 restoration, and a staged rollout remain required before production use.

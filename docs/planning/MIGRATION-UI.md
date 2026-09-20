@@ -19,6 +19,11 @@ are schema-validated, unexpected secret fields are stripped, and exception messa
 are mapped to fixed UI text. Requests omit cookies/referrers, disable caching, and
 reject redirects so custom authentication headers are not forwarded elsewhere.
 
+Absolute custom sync-server settings follow the source store's server-root
+convention: append `/api`, preserving any deployment subpath. An explicitly supplied
+`/api` suffix is not duplicated. A client regression test covers both forms and
+same-origin relative API paths; production credentials are never used in this test.
+
 ## Evidence
 
 - Seven client tests cover upload allowlisting/row fidelity, exact password bytes,

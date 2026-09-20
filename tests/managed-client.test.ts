@@ -247,3 +247,32 @@ test('membership client rejects contradictory lifetime/date responses', async ()
     await assert.rejects(api.account(publicAccount.id), { code: 'INVALID_RESPONSE' })
   }
 })
+
+test('managed requests follow the existing absolute sync-server root convention', async () => {
+  for (const [serverUrl, endpoint] of [
+    ['', '/api/managed/accounts'],
+    ['/custom-api/', '/custom-api/managed/accounts'],
+    ['https://synthetic.invalid', 'https://synthetic.invalid/api/managed/accounts'],
+    ['https://synthetic.invalid/', 'https://synthetic.invalid/api/managed/accounts'],
+    [
+      'https://synthetic.invalid/subpath/',
+      'https://synthetic.invalid/subpath/api/managed/accounts',
+    ],
+    [
+      'https://synthetic.invalid/subpath/api/',
+      'https://synthetic.invalid/subpath/api/managed/accounts',
+    ],
+  ]) {
+    let requested: unknown
+    const api = createManagedApi({
+      ...auth,
+      serverUrl,
+      fetch: async (url) => {
+        requested = url
+        return reply({ accounts: [], nextCursor: null })
+      },
+    })
+    await api.accounts()
+    assert.equal(requested, `${endpoint}?limit=100`)
+  }
+})
