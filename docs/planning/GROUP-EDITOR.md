@@ -144,3 +144,8 @@ Settings, FAQ and Activity; Metrics/Replay lazy routes were reached but their
 analytics and share-link behavior still need full feature acceptance. No real
 Android/provider rollout, backup restoration, live expiry or load/soak behavior is
 established here. G3 authoring is a development checkpoint, not release approval.
+
+Hosted verification for code checkpoint `27520114782862dc3252298c6de30a4be1d8dd5c`
+passed all five jobs: Windows, Linux, PostgreSQL (72 cases), and AMD64/ARM64
+containers in [run 35493646398](https://github.com/hossman39/AIOManager/actions/runs/35493646398).
+No image was published and no deployment step ran.

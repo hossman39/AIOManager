@@ -50,8 +50,10 @@ with 72 PostgreSQL cases reserved for hosted execution. Synthetic browser checks
 cover metadata/catalog retention, protected/disabled entries, bulk assignment,
 group/personal lost-response replay, stale edits, empty publication consent,
 reload, lifetime saves, navigation guarding and a 390px editor layout. No paying
-accounts or real addon/provider services are used. Hosted results are recorded
-separately once available.
+accounts or real addon/provider services are used. Code checkpoint `2752011`
+also passed all five hosted jobs, including its 72 PostgreSQL cases, in
+[run 35493646398](https://github.com/hossman39/AIOManager/actions/runs/35493646398).
+No image publication or production deployment ran.
 
 ## First-increment evidence (historical)
 
