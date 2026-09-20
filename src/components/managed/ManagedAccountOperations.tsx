@@ -76,7 +76,9 @@ export function ManagedAccountOperations({
       setNotice(
         result.removedAt
           ? 'Stremio cleanup verified. Local account removed.'
-          : 'Request saved. Waiting for verified sync.'
+          : result.account?.state === 'staged'
+            ? 'Login verified. This user remains staged.'
+            : 'Request saved. Waiting for verified sync.'
       )
       if (result.account) updated.current(result.account)
       else removed.current()
@@ -358,7 +360,7 @@ export function ManagedAccountOperations({
       )}
       {notice && (
         <p role="status" className="text-sm">
-          {notice}
+          {job?.state === 'verified' ? 'The latest sync request is verified.' : notice}
         </p>
       )}
       {mutation.uncertain && (

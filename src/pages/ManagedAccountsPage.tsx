@@ -777,9 +777,11 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
           </table>
           {!loading && shownAccounts.length === 0 && (
             <p className="p-4 text-sm text-muted-foreground">
-              {accounts.length
-                ? 'No loaded users match this search.'
-                : 'No managed users saved yet. Preview an export above to get started.'}
+              {view === 'expired'
+                ? 'No expired users match this view.'
+                : accounts.length
+                  ? 'No loaded users match this search.'
+                  : 'No managed users saved yet. Preview an export above to get started.'}
             </p>
           )}
           {loading && accounts.length === 0 && (

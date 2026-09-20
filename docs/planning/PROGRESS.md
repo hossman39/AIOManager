@@ -14,14 +14,23 @@ verified offboarding are connected. Memberships support selectable named timezon
 restore tool are included. See [MANAGED-RUNTIME.md](MANAGED-RUNTIME.md) and the
 [testing walkthrough](../TESTING-MANAGED.md).
 
-Local Windows validation: 275 tests passed, 105 PostgreSQL cases assigned to hosted
-CI; typecheck, lint and production build passed. Both production dependency audits
+Local Windows validation: 275 tests passed, plus the subsequent offline restore CLI
+rehearsal. Typecheck, lint and production build passed. Both production dependency audits
 report zero findings. New tests include the native HTTP lifecycle, response/body
 timeouts, cross-process writer exclusion, authenticated backup restore/tamper and
 retention, plus the existing 100-account and encrypted restart recovery contracts.
 Browser checks confirm the New York default, selecting/saving/reloading Kathmandu,
-rejection of a New York spring gap, and explicit fall-fold choices. Further browser
-and hosted results are recorded with the final testing checkpoint.
+rejection of a New York spring gap, and explicit fall-fold choices. At 390px, the
+page has no horizontal overflow; activation, verified sync, a simulated lost
+sync response and same-request replay, lifetime renewal, expired filtering and
+verified removal passed. Two stale status messages found during rehearsal were
+corrected. The restore CLI was also executed against a fresh directory, then the
+restored application was booted and its authenticated account read successfully.
+
+Runtime checkpoint `e2ef0f1` passed all five hosted jobs in
+[run 35512509290](https://github.com/hossman39/AIOManager/actions/runs/35512509290):
+275 tests each on Windows and Linux, all 105 PostgreSQL cases, and AMD64/ARM64
+container smoke checks. No image publication or production deployment ran.
 
 Remaining acceptance is on dedicated Stremio accounts/Android, the owner's actual
 export and VPS, and the production soak/release gates. The test instance has a

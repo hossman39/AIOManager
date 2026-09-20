@@ -112,6 +112,8 @@ export async function writeManagedBackup({ db, keys, directory, now = Date.now, 
       const file = await fs.open(temporary, 'a')
       try {
         await file.write(cipher.getAuthTag())
+        if ((await file.stat()).size > 2 * 1024 ** 3)
+          throw new Error('Backup exceeds restore size limit')
         await file.sync()
       } finally {
         await file.close()

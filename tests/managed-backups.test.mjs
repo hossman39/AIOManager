@@ -19,6 +19,9 @@ import { initializeManagedCrypto } from '../server/managed/crypto.js'
 import { createManagedRepository } from '../server/managed/repository.js'
 import { migrateManagedSchema } from '../server/managed/schema.js'
 import { randomUUID } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { buildServer } from '../server/app.js'
 
 test('daily encrypted snapshots restore credentials, selected timezone, and key material with all writes paused', async () => {
   const directory = await fs.mkdtemp(path.join(tmpdir(), 'aiomanager-backup-test-'))
@@ -100,6 +103,74 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     const target = path.resolve(directory)
     assert.equal(path.dirname(target), path.resolve(tmpdir()))
     assert.ok(path.basename(target).startsWith('aiomanager-backup-test-'))
+    await fs.rm(target, { recursive: true, force: true })
+  }
+})
+
+test('offline restore CLI isolates its database and boots with the complete restored keyring', async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), 'aiomanager-backup-cli-'))
+  const db = new DB({ env: {}, sqlitePath: ':memory:' })
+  let app
+  try {
+    await db.init()
+    const fixture = await prepareManagedFixture(db)
+    const staged = await fixture.repository.stageImport(firstAuth, parsedAccounts(), randomUUID())
+    const keys = { primary: syntheticKey, candidates: [syntheticKey, 'synthetic-retired-key'] }
+    const backup = await writeManagedBackup({
+      db,
+      keys,
+      directory: path.join(directory, 'archives'),
+    })
+    const target = path.join(directory, 'restored')
+    const invoke = () =>
+      spawnSync(
+        process.execPath,
+        [
+          fileURLToPath(new URL('../server/restore-backup.js', import.meta.url)),
+          backup.filename,
+          target,
+        ],
+        {
+          windowsHide: true,
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: {
+            ...process.env,
+            AIO_BACKUP_KEY: syntheticKey,
+            AIO_RESTORE_DATABASE_URL: '',
+            DB_TYPE: 'postgres',
+            DATABASE_URL: 'postgres://must-never-be-opened.invalid/production',
+            ENCRYPTION_KEY: 'wrong-existing-configuration',
+          },
+        }
+      )
+    const restored = invoke()
+    assert.equal(restored.status, 0, restored.stderr)
+    assert.equal(restored.stdout.includes(syntheticKey), false)
+    const before = await fs.readFile(path.join(target, 'aio.db'))
+    assert.equal(invoke().status, 1, 'An existing target is refused')
+    assert.deepEqual(await fs.readFile(path.join(target, 'aio.db')), before)
+    app = await buildServer({ env: {}, dataDir: target, logger: false, serveStatic: false })
+    const headers = { 'x-manager-id': firstAuth.owner, 'x-sync-password': firstAuth.token }
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/managed/accounts/${staged.accounts[0].id}`,
+      headers,
+    })
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().email, 'Person@example.invalid')
+    const status = await app.inject({ method: 'GET', url: '/api/managed/status', headers })
+    assert.equal(status.json().writePaused, true)
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(path.join(target, 'server_fallback_keys.json'), 'utf8')),
+      keys.candidates
+    )
+  } finally {
+    await app?.close()
+    await db.close()
+    const target = path.resolve(directory)
+    assert.equal(path.dirname(target), path.resolve(tmpdir()))
+    assert.ok(path.basename(target).startsWith('aiomanager-backup-cli-'))
     await fs.rm(target, { recursive: true, force: true })
   }
 })
