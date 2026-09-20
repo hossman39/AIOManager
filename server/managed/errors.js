@@ -2,14 +2,15 @@ const definitions = {
   UNAUTHORIZED: [401, 'A valid manager login is required.'],
   NOT_FOUND: [404, 'The managed record was not found.'],
   INVALID_INPUT: [400, 'The managed request is invalid.'],
-  INVALID_EXPIRY: [422, 'Select a valid New York date and time.'],
+  INVALID_EXPIRY: [422, 'Select a valid expiry date and time.'],
+  INVALID_TIMEZONE: [422, 'Select a valid named timezone.'],
   NONEXISTENT_EXPIRY: [
     422,
-    'That New York time does not exist because the clock moves forward. Select a different time.',
+    'That time does not exist in the selected timezone because the clock moves forward. Select a different time.',
   ],
   AMBIGUOUS_EXPIRY: [
     422,
-    'That New York time occurs twice. Select the daylight or standard-time occurrence.',
+    'That time occurs twice in the selected timezone. Select the intended occurrence.',
   ],
   IDEMPOTENCY_KEY_REQUIRED: [400, 'A request idempotency key is required.'],
   IDEMPOTENCY_CONFLICT: [409, 'This request key was already used for different content.'],
@@ -59,6 +60,19 @@ const definitions = {
     'Publishing an empty or entirely disabled addon setup requires an explicit choice.',
   ],
   WRITE_PAUSED: [409, 'Managed writes are paused.'],
+  WRITER_UNAVAILABLE: [
+    503,
+    'The sync writer is starting, recovering, or owned by another instance. Try again shortly.',
+  ],
+  MANAGED_ACCOUNT: [
+    409,
+    'This Stremio account is managed here. Use Managed users to change its addons.',
+  ],
+  PROVIDER_FAILURE: [502, 'Stremio could not confirm the operation. Check the account and retry.'],
+  INVALID_CREDENTIALS: [
+    422,
+    'Stremio rejected the saved credentials. Check the email and password.',
+  ],
   LEASE_LOST: [409, 'The job lease is no longer current.'],
   IDENTITY_MISMATCH: [409, 'The provider session does not match the enrolled account.'],
   DATA_UNREADABLE: [503, 'Managed data cannot be decrypted. Restore the matching key and data.'],

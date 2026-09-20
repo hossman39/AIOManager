@@ -565,7 +565,7 @@ export function ManagedGroupsPanel({
       setNotice(
         result.unchanged
           ? 'This revision was already published. No new jobs were queued.'
-          : `Group revision saved. ${result.queued ?? 0} jobs recorded; provider writes remain disabled.`
+          : `Group revision saved. ${result.queued ?? 0} sync jobs recorded. Follow the rollout status below.`
       )
       onAccountsChanged()
     } else setNotice('Saved group loaded. Addon changes remain a draft until published.')
@@ -591,7 +591,7 @@ export function ManagedGroupsPanel({
       </div>
       <p className="text-sm text-muted-foreground">
         Create a reusable addon setup, save a draft, then publish one revision for its eligible
-        members. This development build records work but does not execute it.
+        members. Activated users sync when managed sync is running.
       </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -654,8 +654,8 @@ export function ManagedGroupsPanel({
             {shownDeployment ? ` · revision ${shownDeployment.revision}` : ''}
           </h4>
           <p>
-            Provider writes are disabled. Pending is not verified, and successful publication does
-            not mean an account was changed.
+            Pending jobs wait for managed sync to be enabled and resumed. Verified means the server
+            read back the expected addon setup from Stremio.
           </p>
           {progressPending && <p role="status">Reading recorded rollout…</p>}
           {!progressPending && !progressError && !shownDeployment && (

@@ -46,13 +46,29 @@ async function readKey(filename) {
 export async function loadServerKeys({ db, dataDir, configuredKey }) {
   const filename = path.join(dataDir, 'server_secret.key')
   const fileKey = await readKey(filename)
+  let restoredFallbacks = []
+  try {
+    restoredFallbacks = JSON.parse(
+      await fs.readFile(path.join(dataDir, 'server_fallback_keys.json'), 'utf8')
+    )
+    if (
+      !Array.isArray(restoredFallbacks) ||
+      restoredFallbacks.length > 16 ||
+      restoredFallbacks.some((key) => typeof key !== 'string' || !key)
+    )
+      throw new Error('Invalid restored encryption keyring')
+  } catch (error) {
+    if (error.code !== 'ENOENT')
+      throw new Error('Restored encryption keyring is unreadable; restore the matching key files')
+  }
   if (configuredKey) {
     return {
       primary: configuredKey,
-      candidates: [...new Set([configuredKey, fileKey].filter(Boolean))],
+      candidates: [...new Set([configuredKey, fileKey, ...restoredFallbacks].filter(Boolean))],
     }
   }
-  if (fileKey) return { primary: fileKey, candidates: [fileKey] }
+  if (fileKey)
+    return { primary: fileKey, candidates: [...new Set([fileKey, ...restoredFallbacks])] }
   if (await hasRetainedData(db)) {
     throw new Error(
       'Encryption key is missing for retained data; restore the matching key before startup'

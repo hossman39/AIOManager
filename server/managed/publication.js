@@ -344,7 +344,9 @@ export function createGroupPublicationRepository({
         ? await db.query(
             `SELECT j.id, j.account_id, j.policy_version, j.target, j.state, j.error_code,
           a.policy_version AS current_policy FROM managed_jobs j JOIN managed_accounts a ON a.owner_id = j.owner_id AND a.id = j.account_id
-          WHERE j.owner_id = $1 AND j.id IN (${ids.map((_, index) => `$${index + 2}`).join(', ')})`,
+          WHERE j.owner_id = $1 AND j.id IN (${ids.map((_, index) => `$${index + 2}`).join(', ')})
+          UNION ALL SELECT id, account_id, policy_version, target, state, error_code, policy_version AS current_policy
+          FROM managed_job_history WHERE owner_id = $1 AND id IN (${ids.map((_, index) => `$${index + 2}`).join(', ')})`,
             [owner, ...ids]
           )
         : []

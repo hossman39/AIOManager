@@ -9,6 +9,48 @@ export function managedMembershipContract(prefix, options, fixture) {
   const check = (name, fn) =>
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
 
+  check(
+    'chosen timezone survives saves, replay and an equivalent-instant timezone edit',
+    async ({ repository }) => {
+      const id = (await repository.stageImport(firstAuth, parsedAccounts(), randomUUID()))
+        .accounts[0].id
+      const key = randomUUID()
+      const input = {
+        mode: 'term',
+        local: '2027-01-01T12:00',
+        timezone: 'Asia/Kathmandu',
+        expectedVersion: 1,
+      }
+      const saved = await repository.setMembership(firstAuth, id, input, key)
+      assert.equal(saved.account.expiry.timezone, 'Asia/Kathmandu')
+      assert.equal(saved.account.expiry.offset, 345)
+      assert.equal(saved.account.expiry.at, Date.parse('2027-01-01T06:15:00Z'))
+      assert.equal((await repository.setMembership(firstAuth, id, input, key)).replayed, true)
+      const changed = await repository.setMembership(
+        firstAuth,
+        id,
+        {
+          mode: 'term',
+          local: '2027-01-01T06:15',
+          timezone: 'UTC',
+          expectedVersion: saved.account.version,
+        },
+        randomUUID()
+      )
+      assert.equal(changed.account.expiry.at, saved.account.expiry.at)
+      assert.equal((await repository.getAccount(firstAuth, id)).expiry.timezone, 'UTC')
+      await assert.rejects(
+        repository.setMembership(
+          firstAuth,
+          id,
+          { ...input, timezone: 'Bad/Timezone', expectedVersion: changed.account.version },
+          randomUUID()
+        ),
+        { code: 'INVALID_TIMEZONE' }
+      )
+    }
+  )
+
   test(
     `${prefix}: additive upgrade preserves existing dates and encrypted records without inventing lifetime`,
     options,
@@ -33,7 +75,14 @@ export function managedMembershipContract(prefix, options, fixture) {
       await migrateManagedSchema(db)
       assert.deepEqual(
         await db.query('SELECT * FROM managed_accounts ORDER BY id'),
-        before.map((row) => ({ ...row, lifetime: 0, suspended_at: null }))
+        before.map((row) => ({
+          ...row,
+          lifetime: 0,
+          suspended_at: null,
+          expiry_zone: 'America/New_York',
+          expiry_zone_offset: null,
+          suspension_check_at: null,
+        }))
       )
       assert.deepEqual(
         await db.get('SELECT * FROM managed_schema_migrations WHERE version = 1'),

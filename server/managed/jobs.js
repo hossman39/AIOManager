@@ -218,7 +218,7 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
           }
           const token = randomUUID()
           await tx.run(
-            `UPDATE managed_jobs SET state = 'running', lease_token = $1, lease_until = $2, attempts = attempts + 1, updated_at = $3 WHERE id = $4`,
+            `UPDATE managed_jobs SET state = 'running', lease_token = $1, lease_until = $2, attempts = attempts + 1, cycle_attempts = cycle_attempts + 1, updated_at = $3 WHERE id = $4`,
             [token, timestamp + leaseMs, timestamp, job.id]
           )
           return {
@@ -227,6 +227,7 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
             lease_token: token,
             lease_until: timestamp + leaseMs,
             attempts: job.attempts + 1,
+            cycle_attempts: job.cycle_attempts + 1,
             updated_at: timestamp,
           }
         }
@@ -245,6 +246,36 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
           [timestamp, limit]
         )
         for (const account of accounts) await enqueueInTransaction(tx, account, 'expiry', timestamp)
+        const suspended = await tx.query(
+          `SELECT * FROM managed_accounts WHERE state = 'active' AND suspended_at IS NOT NULL
+          AND (suspension_check_at IS NULL OR suspension_check_at <= $1)
+          ORDER BY suspension_check_at, id LIMIT $2${tx.type === 'postgres' ? ' FOR UPDATE SKIP LOCKED' : ''}`,
+          [timestamp, limit]
+        )
+        for (const account of suspended) {
+          const job = await enqueueInTransaction(tx, account, 'expiry', timestamp)
+          const canRetry =
+            job.state === 'verified' ||
+            (job.state === 'failed' &&
+              [
+                'NETWORK_ERROR',
+                'RATE_LIMITED',
+                'PROVIDER_UNAVAILABLE',
+                'OUTCOME_UNKNOWN',
+                'VERIFICATION_MISMATCH',
+              ].includes(job.error_code))
+          if (canRetry)
+            await tx.run(
+              `UPDATE managed_jobs SET state = 'pending', execution_enc = NULL, cycle_attempts = 0, priority = 60,
+            write_intent = 0, error_code = NULL, due_at = $1, updated_at = $1 WHERE id = $2`,
+              [timestamp, job.id]
+            )
+          await tx.run('UPDATE managed_accounts SET suspension_check_at = $1 WHERE id = $2', [
+            timestamp + 300_000,
+            account.id,
+          ])
+        }
+        await tx.run('UPDATE managed_metadata SET last_scan_at = $1 WHERE id = 1', [timestamp])
         return accounts.length
       })
     },
@@ -387,6 +418,49 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
           'UPDATE managed_accounts SET applied_version = $1, applied_target = $2, verified_at = $3 WHERE owner_id = $4 AND id = $5 AND policy_version = $1',
           [job.policy_version, job.target, timestamp, account.owner_id, account.id]
         )
+        if (job.target === 'suspended')
+          await tx.run('UPDATE managed_accounts SET suspension_check_at = $1 WHERE id = $2', [
+            timestamp + 300_000,
+            account.id,
+          ])
+        // A verified empty collection is the only path that removes an enrolled
+        // account. Keep identity/job tombstones, never credentials or snapshots.
+        if (job.target === 'offboard') {
+          await tx.run(
+            `INSERT INTO managed_offboarded (provider_key, owner_id, account_id, removed_at)
+            VALUES ($1, $2, $3, $4) ON CONFLICT (provider_key) DO NOTHING`,
+            [account.provider_key, account.owner_id, account.id, timestamp]
+          )
+          await tx.run(
+            `INSERT INTO managed_job_history (id, owner_id, account_id, policy_version, target, state, error_code, updated_at)
+            SELECT id, owner_id, account_id, policy_version, target,
+            CASE WHEN state = 'verified' THEN 'verified' ELSE 'superseded' END, NULL, $1
+            FROM managed_jobs WHERE account_id = $2`,
+            [timestamp, account.id]
+          )
+          await tx.run('DELETE FROM managed_snapshots WHERE account_id = $1', [account.id])
+          await tx.run('DELETE FROM managed_jobs WHERE account_id = $1', [account.id])
+          const receipts = await tx.query(
+            "SELECT scope, request_key, response_enc FROM managed_idempotency WHERE owner_id = $1 AND scope = 'accounts.personal'",
+            [account.owner_id]
+          )
+          for (const receipt of receipts) {
+            const response = crypto.open(
+              receipt.response_enc,
+              context(
+                account.owner_id,
+                `${receipt.scope}:${receipt.request_key}`,
+                'idempotency-response'
+              )
+            )
+            if (response.account?.id === account.id)
+              await tx.run(
+                'DELETE FROM managed_idempotency WHERE owner_id = $1 AND scope = $2 AND request_key = $3',
+                [account.owner_id, receipt.scope, receipt.request_key]
+              )
+          }
+          await tx.run('DELETE FROM managed_accounts WHERE id = $1', [account.id])
+        }
         return { state: 'verified' }
       })
     },
@@ -403,6 +477,11 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
           'UPDATE managed_jobs SET state = $1, due_at = $2, error_code = $3, lease_token = NULL, lease_until = NULL, updated_at = $4 WHERE id = $5',
           [state, dueAt, code, timestamp, job.id]
         )
+        if (terminal && job.target === 'suspended')
+          await tx.run('UPDATE managed_accounts SET suspension_check_at = $1 WHERE id = $2', [
+            Math.max(timestamp + 15 * 60_000, dueAt),
+            account.id,
+          ])
         return { state }
       })
     },

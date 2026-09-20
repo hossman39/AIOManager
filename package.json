@@ -12,6 +12,8 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.tests.json",
     "test": "node --import tsx --test tests/*.test.ts tests/*.test.mjs",
+    "managed:demo": "node scripts/ui-rehearsal.mjs --live",
+    "managed:test": "node scripts/managed-test-server.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "preview": "vite preview",
     "prepare": "husky || true",

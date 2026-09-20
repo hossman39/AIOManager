@@ -142,7 +142,13 @@ export function managedWorkerContract(prefix, options, fixture) {
       const after = await s.db.query('SELECT * FROM managed_accounts ORDER BY id')
       assert.deepEqual(
         after,
-        before.map((row) => ({ ...row, suspended_at: row.id === s.ids[2] ? null : s.now() }))
+        before.map((row) => ({
+          ...row,
+          suspended_at: row.id === s.ids[2] ? null : s.now(),
+          expiry_zone: 'America/New_York',
+          expiry_zone_offset: null,
+          suspension_check_at: null,
+        }))
       )
       assert.equal((await s.db.get('SELECT execution_enc FROM managed_jobs')).execution_enc, null)
     }

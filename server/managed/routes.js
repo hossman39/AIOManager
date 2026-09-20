@@ -3,6 +3,7 @@ import { MAX_ADDON_CONFIG_BYTES } from '../../shared/addon-config.js'
 import { ManagedError } from './errors.js'
 import { parseImportBody } from './repository.js'
 import { z } from 'zod'
+import { ProviderFailure } from './worker.js'
 
 const manifestInput = z.strictObject({ url: z.string().min(1).max(65_536) })
 
@@ -39,6 +40,10 @@ export async function registerManagedRoutes(app, repository, manifestService) {
         request.managedAuth = auth
       })
       routes.setErrorHandler((error, request, reply) => {
+        if (error instanceof ProviderFailure)
+          error = new ManagedError(
+            error.code === 'INVALID_CREDENTIALS' ? 'INVALID_CREDENTIALS' : 'PROVIDER_FAILURE'
+          )
         if (error instanceof ManagedError) {
           return reply
             .code(error.statusCode)
@@ -74,6 +79,52 @@ export async function registerManagedRoutes(app, repository, manifestService) {
         })
       })
       routes.get('/status', (request) => repository.status(request.managedAuth))
+      routes.post('/settings', { bodyLimit: 4096 }, (request) =>
+        repository.setSettings(
+          request.managedAuth,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/accounts/:id/activation-preview', { bodyLimit: 4096 }, (request) =>
+        repository.previewActivation(request.managedAuth, request.params.id, request.body)
+      )
+      routes.post('/accounts/:id/activate', { bodyLimit: 36 * 1024 }, (request) =>
+        repository.activateAccount(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.get('/accounts/:id/execution', (request) =>
+        repository.accountExecution(request.managedAuth, request.params.id)
+      )
+      routes.post('/accounts/:id/reconnect', { bodyLimit: 32 * 1024 }, (request) =>
+        repository.reconnectAccount(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/accounts/:id/sync', { bodyLimit: 4096 }, (request) =>
+        repository.requestSync(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/accounts/:id/offboard', { bodyLimit: 4096 }, (request) =>
+        repository.requestSync(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key'],
+          true
+        )
+      )
       routes.post('/manifests/resolve', { bodyLimit: 65 * 1024 }, (request, reply) => {
         const parsed = manifestInput.safeParse(request.body)
         if (!parsed.success) throw new ManagedError('INVALID_INPUT')
@@ -150,6 +201,7 @@ export async function registerManagedRoutes(app, repository, manifestService) {
       )
       routes.get('/accounts', (request) =>
         repository.listAccounts(request.managedAuth, {
+          ...(request.query.view === undefined ? {} : { view: request.query.view }),
           ...(request.query.limit === undefined ? {} : { limit: Number(request.query.limit) }),
           ...(request.query.after === undefined ? {} : { after: request.query.after }),
         })

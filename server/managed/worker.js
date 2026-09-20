@@ -17,6 +17,7 @@ const terminal = new Set([
   'IDENTITY_MISMATCH',
   'DATA_UNREADABLE',
   'INVALID_STATE',
+  'MANIFEST_UNAVAILABLE',
 ])
 const same = (first, second) => canonicalJson(first) === canonicalJson(second)
 
@@ -61,6 +62,7 @@ export function createManagedWorker({
   maxAttempts = 5,
   circuitThreshold = 3,
   circuitMs = 30_000,
+  validateManifests,
 }) {
   if (
     !db ||
@@ -111,14 +113,20 @@ export function createManagedWorker({
     try {
       // Deliberately await settlement after abort. Racing the promise and freeing
       // the slot would let a slow old request overlap the next writer.
-      const result = await operation(controller.signal)
+      const result = await operation({
+        signal: controller.signal,
+        beforeDispatch: async () => {
+          await jobs.heartbeat(claim)
+          await jobs.checkDispatch(claim, policy.stamp)
+        },
+      })
       if (controller.signal.aborted)
         throw new ProviderFailure(writing ? 'OUTCOME_UNKNOWN' : 'NETWORK_ERROR')
       return result
     } catch (error) {
       if (controller.signal.aborted)
         throw new ProviderFailure(writing ? 'OUTCOME_UNKNOWN' : 'NETWORK_ERROR')
-      throw error instanceof ProviderFailure
+      throw error instanceof ProviderFailure || error instanceof ManagedError
         ? error
         : new ProviderFailure(writing ? 'OUTCOME_UNKNOWN' : 'NETWORK_ERROR')
     } finally {
@@ -139,14 +147,24 @@ export function createManagedWorker({
       const execution = await jobs.readExecution(claim)
       if (execution.state !== 'current') return { state: execution.state }
       const { policy } = execution
-      const identity = await request(claim, policy, (signal) =>
-        provider.getIdentity(policy.provider, { signal })
+      if (policy.target === 'active' && validateManifests) {
+        try {
+          if (
+            (await validateManifests([...policy.group, ...policy.personal], {
+              signal: shutdown.signal,
+            })) !== true
+          )
+            throw new Error('Manifest validation unavailable')
+        } catch {
+          throw new ProviderFailure('MANIFEST_UNAVAILABLE')
+        }
+      }
+      const identity = await request(claim, policy, (options) =>
+        provider.getIdentity(policy.provider, options)
       )
       if (identity !== policy.provider.id) throw new ProviderFailure('IDENTITY_MISMATCH')
       const before = checkedCollection(
-        await request(claim, policy, (signal) =>
-          provider.getCollection(policy.provider, { signal })
-        )
+        await request(claim, policy, (options) => provider.getCollection(policy.provider, options))
       )
       // Exact acceptance uses the durable plan. Otherwise recompute protection
       // against the fresh read, retaining the clean saved descriptors; a retry
@@ -155,13 +173,14 @@ export function createManagedWorker({
         execution.plan && same(before, execution.plan.expected)
           ? execution.plan
           : { ...projectManagedCollection({ ...policy, remote: before }), stamp: policy.stamp }
+      if (provider.normalizeCollection) plan.expected = provider.normalizeCollection(plan.expected)
       if (!same(before, plan.expected)) {
         await jobs.beginWrite(claim, before, plan)
         await request(
           claim,
           policy,
-          (signal) =>
-            provider.setCollection(policy.provider, structuredClone(plan.expected), { signal }),
+          (options) =>
+            provider.setCollection(policy.provider, structuredClone(plan.expected), options),
           true
         )
       }
@@ -169,8 +188,8 @@ export function createManagedWorker({
       if (!same(before, plan.expected)) {
         for (let read = 0; read < 2; read++) {
           observed = checkedCollection(
-            await request(claim, policy, (signal) =>
-              provider.getCollection(policy.provider, { signal })
+            await request(claim, policy, (options) =>
+              provider.getCollection(policy.provider, options)
             )
           )
           if (same(observed, plan.expected)) break
@@ -194,15 +213,19 @@ export function createManagedWorker({
         error instanceof ProviderFailure || error instanceof ManagedError
           ? error.code
           : 'DATA_UNREADABLE'
-      const paused = code === 'WRITE_PAUSED'
-      const failureCode =
-        retryable.has(code) || terminal.has(code) || paused ? code : 'DATA_UNREADABLE'
+      const paused = code === 'WRITE_PAUSED' || code === 'WRITER_UNAVAILABLE'
+      const failureCode = paused
+        ? 'WRITE_PAUSED'
+        : retryable.has(code) || terminal.has(code)
+          ? code
+          : 'DATA_UNREADABLE'
       const retryAfter = error instanceof ProviderFailure ? error.retryAfterMs : 0
       if (retryable.has(failureCode) && failureCode !== 'VERIFICATION_MISMATCH') failures++
       if (failures >= circuitThreshold || retryAfter > 0)
         blockedUntil = Math.max(blockedUntil, monotonic() + Math.max(circuitMs, retryAfter))
       const jitter = Math.min(1, Math.max(0, random()))
-      const backoff = Math.min(300_000, 1000 * 2 ** Math.min(8, claim.attempts - 1))
+      const attempts = claim.cycle_attempts ?? claim.attempts
+      const backoff = Math.min(300_000, 1000 * 2 ** Math.min(8, attempts - 1))
       const dueAt =
         now() + Math.max(Math.ceil(backoff * (0.75 + jitter / 2)), retryAfter, paused ? 1000 : 0)
       try {
@@ -210,7 +233,7 @@ export function createManagedWorker({
           ...(await jobs.retry(claim, {
             code: failureCode,
             dueAt,
-            terminal: !paused && (terminal.has(failureCode) || claim.attempts >= maxAttempts),
+            terminal: !paused && (terminal.has(failureCode) || attempts >= maxAttempts),
           })),
           jobId: claim.id,
           code: failureCode,

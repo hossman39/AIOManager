@@ -5,7 +5,11 @@ import {
   type ManagedAccount,
   type MembershipChange,
 } from '@/api/managed'
-import { newYorkExpiryChoices, resolveNewYorkExpiry } from '../../../shared/new-york-expiry.js'
+import {
+  expiryChoices,
+  resolveExpiry,
+  MEMBERSHIP_TIMEZONE,
+} from '../../../shared/membership-expiry.js'
 import { Button } from '@/components/ui/button'
 import { useUnsavedWarning } from '@/components/common/UnsavedWorkGuard'
 
@@ -23,6 +27,14 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
     account.membershipType === 'unset' ? '' : account.membershipType
   )
   const [local, setLocal] = useState(account.expiry?.local ?? '')
+  const [timezone, setTimezone] = useState(account.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)
+  const timezones = useMemo(() => {
+    const supported =
+      (
+        Intl as typeof Intl & { supportedValuesOf?: (key: 'timeZone') => string[] }
+      ).supportedValuesOf?.('timeZone') ?? []
+    return [...new Set([MEMBERSHIP_TIMEZONE, 'UTC', timezone, ...supported])].sort()
+  }, [timezone])
   const [offset, setOffset] = useState<number | undefined>(account.expiry?.offset)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -32,15 +44,17 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
   const active = useRef(false)
   const abort = useRef<AbortController | null>(null)
   const pending = useRef<{ change: MembershipChange; key: string } | null>(null)
-  const choices = useMemo(() => newYorkExpiryChoices(local), [local])
-  const resolved = useMemo(() => resolveNewYorkExpiry(local, offset), [local, offset])
+  const choices = useMemo(() => expiryChoices(local, timezone), [local, timezone])
+  const resolved = useMemo(() => resolveExpiry(local, offset, timezone), [local, offset, timezone])
   const valid = mode === 'lifetime' || (mode === 'term' && resolved.ok)
   useUnsavedWarning(
     busy ||
       uncertain ||
       mode !== (account.membershipType === 'unset' ? '' : account.membershipType) ||
       (mode === 'term' &&
-        (local !== (account.expiry?.local ?? '') || offset !== account.expiry?.offset))
+        (local !== (account.expiry?.local ?? '') ||
+          offset !== account.expiry?.offset ||
+          timezone !== (account.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)))
   )
 
   useEffect(() => {
@@ -63,7 +77,13 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
         }
       } else if (mode === 'term' && resolved.ok) {
         pending.current = {
-          change: { mode, expectedVersion: account.version, local, offset: resolved.expiry.offset },
+          change: {
+            mode,
+            expectedVersion: account.version,
+            local,
+            offset: resolved.expiry.offset,
+            timezone,
+          },
           key: crypto.randomUUID(),
         }
       } else return
@@ -179,12 +199,31 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
               checked={mode === 'term'}
               onChange={() => setMode('term')}
             />
-            Dated — exact New York cutoff
+            Dated — exact date and time
           </label>
           {mode === 'term' && (
             <div className="space-y-3">
+              <label htmlFor="membership-timezone" className="block text-sm font-medium">
+                Timezone
+              </label>
+              <input
+                id="membership-timezone"
+                list="membership-timezones"
+                required
+                value={timezone}
+                className="block w-full min-w-0 max-w-md rounded-md border bg-background px-3 py-2 text-sm"
+                onChange={(event) => {
+                  setTimezone(event.target.value)
+                  setOffset(undefined)
+                }}
+              />
+              <datalist id="membership-timezones">
+                {timezones.map((zone) => (
+                  <option key={zone} value={zone} />
+                ))}
+              </datalist>
               <label htmlFor="membership-cutoff" className="block text-sm font-medium">
-                Expiry date and time (America/New_York)
+                Expiry date and time
               </label>
               <input
                 id="membership-cutoff"
@@ -202,13 +241,16 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
                 }}
               />
               <p id="membership-time-help" className="text-sm text-muted-foreground">
-                Uses New York time regardless of your device timezone, with no grace period.
+                Uses the selected timezone, with no grace period. Changing timezone keeps the date
+                and time shown here.
               </p>
               {local && !choices.ok && (
                 <p role="alert" className="text-sm text-destructive">
                   {choices.code === 'NONEXISTENT_EXPIRY'
-                    ? 'That time does not exist in New York because the clocks move forward. Choose another time.'
-                    : 'Enter a valid date and time.'}
+                    ? 'That time does not exist in this timezone because the clocks move forward. Choose another time.'
+                    : choices.code === 'INVALID_TIMEZONE'
+                      ? 'Select a valid timezone from the list or enter a named timezone.'
+                      : 'Enter a valid date and time.'}
                 </p>
               )}
               {choices.ok && choices.choices.length > 1 && (

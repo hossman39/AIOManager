@@ -15,6 +15,10 @@ import { initializeManagedCrypto, equalSecret } from './managed/crypto.js'
 import { createManagedRepository } from './managed/repository.js'
 import { registerManagedRoutes } from './managed/routes.js'
 import { createManagedManifestService } from './managed/manifests.js'
+import { createManagedRuntime } from './managed/runtime.js'
+import { createStremioProvider } from './managed/stremio.js'
+import { ManagedError } from './managed/errors.js'
+import { createManagedBackupScheduler } from './managed/backups.js'
 // let LZString import removed - obsolete
 
 // Construction does not bind a port, install signal handlers, or start jobs.
@@ -43,7 +47,6 @@ export async function buildServer(options = {}) {
   const PROXY_CONCURRENCY_LIMIT = parseInt(env.PROXY_CONCURRENCY_LIMIT || '50')
   const MAX_QUEUE_SIZE = 500
   const DOMAIN_THROTTLE_MS = 200
-  const STREMIO_API = 'https://api.strem.io/api'
   const dbPath = path.join(DATA_DIR, 'aio.db')
   const db = options.database || new DB({ env, sqlitePath: dbPath })
 
@@ -322,6 +325,17 @@ export async function buildServer(options = {}) {
     await db.exec(schema)
     await migrateManagedSchema(db)
     const managedCrypto = await initializeManagedCrypto(db, keys)
+    const backups = createManagedBackupScheduler({
+      db,
+      keys,
+      directory: env.MANAGED_BACKUP_DIR || path.join(DATA_DIR, 'backups'),
+      onError: () => fastify.log.error({ category: 'Managed' }, 'Daily encrypted backup failed'),
+    })
+    fastify.addHook('onListen', async () => {
+      if (options.backgroundWorkers === true && env.MANAGED_BACKUPS_ENABLED !== 'false')
+        backups.start()
+    })
+    fastify.addHook('preClose', async () => backups.close())
     const manifestService =
       options.manifestService ??
       createManagedManifestService({
@@ -331,11 +345,27 @@ export async function buildServer(options = {}) {
           .filter(Boolean),
       })
     fastify.addHook('preClose', async () => manifestService.close())
+    const managedRuntime = createManagedRuntime({
+      db,
+      crypto: managedCrypto,
+      enabled: env.MANAGED_WRITES_ENABLED === 'true',
+      provider: options.stremioProvider ?? createStremioProvider({ fetch }),
+      onError: (code) =>
+        fastify.log.warn({ category: 'Managed', code }, 'Managed writer unavailable'),
+      workerOptions: { validateManifests: manifestService.validateManifests },
+      ...options.managedRuntimeOptions,
+    })
+    fastify.decorate('managedRuntime', managedRuntime)
+    fastify.addHook('onListen', async () => {
+      if (options.backgroundWorkers === true) await managedRuntime.start()
+    })
+    fastify.addHook('preClose', async () => managedRuntime.close())
     const managedRepository = createManagedRepository({
       db,
       crypto: managedCrypto,
       legacyKeys: FALLBACK_KEYS,
       validateManifests: manifestService.validateManifests,
+      runtime: managedRuntime,
     })
 
     // Migration: Add addon_list column if it doesn't exist (for existing databases)
@@ -930,79 +960,29 @@ export async function buildServer(options = {}) {
           })
         }
 
-        const MAX_RETRIES = 2
-        let lastError = null
-
-        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-          const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 30000)
-
-          try {
-            if (attempt > 0) {
-              fastify.log.warn(
-                { category: 'Sync' },
-                `[Proxy] Retrying Stremio API ${type} (Attempt ${attempt + 1}/${MAX_RETRIES + 1})...`
-              )
-              await new Promise((r) => setTimeout(r, 1000 * attempt))
-            }
-
-            const response = await fetch(
-              'https://api.strem.io/api/' + type.charAt(0).toLowerCase() + type.slice(1),
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type, ...payload }),
-                signal: controller.signal,
-              }
-            )
-
-            clearTimeout(timeoutId)
-
-            if (!response.ok && response.status >= 500 && attempt < MAX_RETRIES) {
-              continue
-            }
-
-            const data = await response.json()
-
-            // Also sanitize the result of DatastoreGet for safety
-            if (
-              type === 'DatastoreGet' &&
-              data?.result?.library &&
-              Array.isArray(data.result.library)
-            ) {
-              data.result.library = data.result.library.map((item) => {
-                if (item.removed) {
-                  return {
+        try {
+          const data =
+            type === 'AddonCollectionSet'
+              ? await managedRuntime.legacySet(payload.authKey, payload.addons)
+              : await managedRuntime.raw(type, payload)
+          if (type === 'DatastoreGet' && Array.isArray(data?.result?.library)) {
+            data.result.library = data.result.library.map((item) =>
+              item.removed
+                ? {
                     ...item,
                     _ctime: item._ctime || '0001-01-01T00:00:00Z',
                     _mtime: item._mtime || '0001-01-01T00:00:00Z',
                   }
-                }
-                return item
-              })
-            }
-
-            return data
-          } catch (err) {
-            clearTimeout(timeoutId)
-            lastError = err
-            const isTimeout = err.name === 'AbortError'
-            const isRetryable =
-              isTimeout || ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(err.code)
-
-            if (isRetryable && attempt < MAX_RETRIES) {
-              continue
-            }
-            break
+                : item
+            )
           }
+          return data
+        } catch (error) {
+          const failure =
+            error instanceof ManagedError ? error : new ManagedError('PROVIDER_FAILURE')
+          reply.status(failure.statusCode)
+          return { error: failure.message, code: failure.code }
         }
-
-        fastify.log.error(
-          { category: 'Server' },
-          `Stremio Proxy Final Failure (${type}): ${lastError.message}`
-        )
-        reply.status(500)
-        return { error: 'Stremio API Proxy Failed', details: lastError.message }
       }
     )
 
@@ -1560,14 +1540,9 @@ export async function buildServer(options = {}) {
         // High-Scale Optimization: Route ALL Stremio API calls through the Proxy Queue.
         // This ensures that fetching the collection (GET) doesn't flood the API
         // during mass failover events across 250,000 accounts.
-        const result = await enqueueProxyRequest(STREMIO_API, () =>
-          axios.post(`${STREMIO_API}/addonCollectionGet`, {
-            type: 'AddonCollectionGet',
-            authKey,
-          })
-        )
-
-        const remoteAddons = result.data?.result?.addons || []
+        const result = await managedRuntime.raw('AddonCollectionGet', { authKey, update: false })
+        if (!Array.isArray(result.result?.addons)) throw new ManagedError('PROVIDER_FAILURE')
+        const remoteAddons = result.result.addons
 
         // 2. Prepare the target state
         const normalizedChain = chain.map((u) => normalizeAddonUrl(u).toLowerCase())
@@ -1701,13 +1676,7 @@ export async function buildServer(options = {}) {
         if (areCollectionsDifferent(finalAddons, remoteAddons)) {
           // High-Scale Optimization: Route Stremio API calls through the Proxy Queue
           // to honor the same concurrency/throttling limits as health checks.
-          await enqueueProxyRequest(STREMIO_API, () =>
-            axios.post(`${STREMIO_API}/addonCollectionSet`, {
-              type: 'AddonCollectionSet',
-              authKey,
-              addons: finalAddons,
-            })
-          )
+          await managedRuntime.legacySet(authKey, finalAddons)
           fastify.log.info(
             { category: 'Autopilot' },
             `[${maskContext(accountId)}] Stremio updated (Mirror): ${finalAddons.length} addons actively installed.`

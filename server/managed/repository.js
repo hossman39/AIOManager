@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { parseCredentialImport } from '../../shared/credential-import.js'
-import { resolveNewYorkExpiry } from '../../shared/new-york-expiry.js'
+import { resolveExpiry, MEMBERSHIP_TIMEZONE } from '../../shared/membership-expiry.js'
 import { authenticateManager } from './auth.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { createManagedJobStore, currentAccountTarget } from './jobs.js'
 import { createManagedGroupRepository } from './groups.js'
+import { createManagedOperations } from './operations.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
@@ -15,7 +16,8 @@ const membershipSchema = z.discriminatedUnion('mode', [
     mode: z.literal('term'),
     expectedVersion: z.number().int().positive(),
     local: z.string(),
-    offset: z.number().int().optional(),
+    offset: z.number().finite().optional(),
+    timezone: z.string().max(100).optional(),
   }),
 ])
 
@@ -30,6 +32,7 @@ export function createManagedRepository({
   legacyKeys,
   now = Date.now,
   validateManifests,
+  runtime,
 }) {
   const authorize = (auth) => authenticateManager(db, auth, legacyKeys)
   const jobs = createManagedJobStore({ db, crypto, now })
@@ -132,11 +135,13 @@ export function createManagedRepository({
           : {
               at: row.expiry_at,
               local: row.expiry_local,
-              offset: row.expiry_offset,
-              timezone: row.expiry_timezone,
+              offset:
+                row.expiry_zone_offset == null ? row.expiry_offset : row.expiry_zone_offset / 60,
+              timezone: row.expiry_zone ?? row.expiry_timezone,
             },
       safeMode: row.safe_mode === null ? null : row.safe_mode === 1,
       suspendedAt: row.suspended_at ?? null,
+      expired: row.state === 'active' && currentAccountTarget(row, now()) === 'suspended',
       appliedVersion: row.applied_version,
       appliedTarget: row.applied_target,
       verifiedAt: row.verified_at,
@@ -146,6 +151,18 @@ export function createManagedRepository({
   }
 
   return Object.freeze({
+    ...createManagedOperations({
+      db,
+      crypto,
+      authorize,
+      ownerTransaction,
+      idempotent,
+      publicAccount,
+      jobs,
+      runtime,
+      now,
+      validateManifests,
+    }),
     ...createManagedGroupRepository({
       db,
       crypto,
@@ -162,7 +179,7 @@ export function createManagedRepository({
       if (!parsed.success) throw new ManagedError('INVALID_INPUT')
       let expiry = null
       if (parsed.data.mode === 'term') {
-        const resolved = resolveNewYorkExpiry(parsed.data.local, parsed.data.offset)
+        const resolved = resolveExpiry(parsed.data.local, parsed.data.offset, parsed.data.timezone)
         if (!resolved.ok) throw new ManagedError(resolved.code)
         const { at, local, offset, timezone } = resolved.expiry
         expiry = { at, local, offset, timezone }
@@ -188,24 +205,30 @@ export function createManagedRepository({
           if (
             account.lifetime === lifetime &&
             account.expiry_at === (expiry?.at ?? null) &&
+            (!expiry ||
+              (account.expiry_local === expiry.local &&
+                (account.expiry_zone ?? MEMBERSHIP_TIMEZONE) === expiry.timezone)) &&
             account.suspended_at === suspendedAt
           )
             return { account: publicAccount(account), jobId: null, replayed: false }
           const result = await tx.run(
             `UPDATE managed_accounts SET lifetime = $1, expiry_at = $2, expiry_local = $3,
             expiry_offset = $4, expiry_timezone = $5, record_version = record_version + 1, policy_version = policy_version + 1,
-            updated_at = $6, suspended_at = $10 WHERE owner_id = $7 AND id = $8 AND record_version = $9`,
+            updated_at = $6, suspended_at = $10, expiry_zone = $11, expiry_zone_offset = $12
+            WHERE owner_id = $7 AND id = $8 AND record_version = $9`,
             [
               lifetime,
               expiry?.at ?? null,
               expiry?.local ?? null,
-              expiry?.offset ?? null,
-              expiry?.timezone ?? null,
+              expiry ? Math.trunc(expiry.offset) : null,
+              expiry ? MEMBERSHIP_TIMEZONE : null, // Legacy constraint; expiry_zone is authoritative since migration 4.
               timestamp,
               owner,
               id,
               change.expectedVersion,
               suspendedAt,
+              expiry?.timezone ?? account.expiry_zone ?? MEMBERSHIP_TIMEZONE,
+              expiry ? Math.round(expiry.offset * 60) : null,
             ]
           )
           if (result.changes !== 1) throw new ManagedError('VERSION_CONFLICT')
@@ -357,8 +380,9 @@ export function createManagedRepository({
         })
       )
     },
-    async listAccounts(auth, { limit = 100, after = '' } = {}) {
+    async listAccounts(auth, { limit = 100, after = '', view = 'all' } = {}) {
       if (
+        !['all', 'expired'].includes(view) ||
         !Number.isInteger(limit) ||
         limit < 1 ||
         limit > 200 ||
@@ -368,8 +392,10 @@ export function createManagedRepository({
         throw new ManagedError('INVALID_INPUT')
       const owner = await authorize(auth)
       const rows = await db.query(
-        'SELECT * FROM managed_accounts WHERE owner_id = $1 AND id > $2 ORDER BY id LIMIT $3',
-        [owner, after, limit + 1]
+        `SELECT * FROM managed_accounts WHERE owner_id = $1 AND id > $2
+        ${view === 'expired' ? "AND state = 'active' AND (suspended_at IS NOT NULL OR (lifetime = 0 AND expiry_at <= $4))" : ''}
+        ORDER BY id LIMIT $3`,
+        view === 'expired' ? [owner, after, limit + 1, now()] : [owner, after, limit + 1]
       )
       return {
         accounts: rows.slice(0, limit).map(publicAccount),
@@ -404,13 +430,19 @@ export function createManagedRepository({
         'SELECT state, COUNT(*) AS count FROM managed_accounts WHERE owner_id = $1 GROUP BY state',
         [owner]
       )
+      const live = runtime
+        ? await runtime.status()
+        : { enabled: false, ready: false, writePaused: true, lastScanAt: null }
       return {
         capabilities: {
           passiveImport: true,
-          providerWrites: false,
+          providerWrites: live.enabled,
           groupPublication: typeof validateManifests === 'function',
         },
-        writePaused: true, // No writer is enabled in this slice, even if a DB flag changes.
+        writePaused: live.writePaused || !settings || settings.write_paused === 1,
+        writerReady: live.ready,
+        lastScanAt: live.lastScanAt,
+        lastBackupAt: live.lastBackupAt ?? null,
         ownerWritePaused: settings ? settings.write_paused === 1 : true,
         safeMode: settings ? settings.safe_mode === 1 : true,
         version: settings?.version ?? null,

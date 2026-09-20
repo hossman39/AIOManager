@@ -179,6 +179,32 @@ UPDATE managed_accounts SET suspended_at = COALESCE(verified_at, updated_at)
       AND j.policy_version = managed_accounts.policy_version AND j.target = 'suspended'
       AND j.state <> 'superseded'));`,
   }),
+  Object.freeze({
+    version: 4,
+    name: 'selectable-membership-timezone',
+    sql: `ALTER TABLE managed_accounts ADD COLUMN expiry_zone TEXT NOT NULL DEFAULT 'America/New_York';
+ALTER TABLE managed_accounts ADD COLUMN expiry_zone_offset INTEGER;`,
+  }),
+  Object.freeze({
+    version: 5,
+    name: 'managed-runtime-and-offboarding',
+    sql: `ALTER TABLE managed_metadata ADD COLUMN writer_dirty INTEGER NOT NULL DEFAULT 0 CHECK (writer_dirty IN (0, 1));
+ALTER TABLE managed_metadata ADD COLUMN last_scan_at BIGINT;
+ALTER TABLE managed_metadata ADD COLUMN last_backup_at BIGINT;
+ALTER TABLE managed_accounts ADD COLUMN suspension_check_at BIGINT;
+ALTER TABLE managed_jobs ADD COLUMN cycle_attempts INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE managed_offboarded (
+  provider_key TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES managed_owners(owner_id),
+  account_id TEXT NOT NULL, removed_at BIGINT NOT NULL
+);
+CREATE TABLE managed_job_history (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, account_id TEXT NOT NULL,
+  policy_version INTEGER NOT NULL, target TEXT NOT NULL, state TEXT NOT NULL,
+  error_code TEXT, updated_at BIGINT NOT NULL
+);
+CREATE INDEX managed_accounts_suspension_check ON managed_accounts (suspension_check_at, id)
+  WHERE state = 'active' AND suspended_at IS NOT NULL;`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

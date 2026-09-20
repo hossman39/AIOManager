@@ -9,6 +9,16 @@ import { managedMembershipContract } from './managed-membership-contract.mjs'
 import { managedGroupsContract } from './managed-groups-contract.mjs'
 import { managedPublicationContract } from './managed-publication-contract.mjs'
 import { managedWorkerContract } from './managed-worker-contract.mjs'
+import { managedRuntimeContract } from './managed-runtime-contract.mjs'
+import { acquireWriterOwnership } from '../server/managed/writer-owner.js'
+import { writeManagedBackup, restoreManagedBackup } from '../server/managed/backups.js'
+import { firstAuth, parsedAccounts, syntheticKey } from './managed-contract.mjs'
+import { migrateManagedSchema } from '../server/managed/schema.js'
+import { initializeManagedCrypto } from '../server/managed/crypto.js'
+import { createManagedRepository } from '../server/managed/repository.js'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 
 const connectionString = process.env.AIO_TEST_POSTGRES_URL
 const options = { skip: !connectionString }
@@ -59,6 +69,75 @@ managedPublicationContract('PostgreSQL group publication', options, async (t) =>
 )
 managedWorkerContract('PostgreSQL managed execution', options, async (t, fixtureOptions) =>
   prepareManagedFixture(await fixture(t), fixtureOptions)
+)
+managedRuntimeContract('PostgreSQL managed lifecycle', options, async (t) =>
+  prepareManagedFixture(await fixture(t))
+)
+
+test(
+  'PostgreSQL advisory ownership excludes a second connection and releases on disconnect',
+  options,
+  async (t) => {
+    const first = await fixture(t),
+      second = await fixture(t)
+    await prepareManagedFixture(first)
+    await prepareManagedFixture(second)
+    let owner = await acquireWriterOwnership(first)
+    try {
+      await owner.assertOwned()
+      await assert.rejects(acquireWriterOwnership(second), { code: 'WRITER_UNAVAILABLE' })
+      await owner.close()
+      owner = await acquireWriterOwnership(second)
+      await owner.assertOwned()
+    } finally {
+      await owner.close()
+    }
+  }
+)
+
+test(
+  'PostgreSQL encrypted backup restores into a separate empty schema with matching credentials and paused writes',
+  options,
+  async (t) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'aiomanager-pg-backup-'))
+    try {
+      const source = await fixture(t),
+        destination = await fixture(t)
+      const s = await prepareManagedFixture(source)
+      const batch = await s.repository.stageImport(firstAuth, parsedAccounts(), randomUUID())
+      await destination.exec(
+        'CREATE TABLE kv_store (key TEXT PRIMARY KEY, value TEXT, password TEXT, updated_at BIGINT)'
+      )
+      await migrateManagedSchema(destination)
+      const keys = { primary: syntheticKey, candidates: [syntheticKey] }
+      await initializeManagedCrypto(destination, keys)
+      const backup = await writeManagedBackup({ db: source, keys, directory })
+      const result = await restoreManagedBackup({
+        db: destination,
+        filename: backup.filename,
+        secret: syntheticKey,
+      })
+      const crypto = await initializeManagedCrypto(destination, result.keys)
+      const repository = createManagedRepository({
+        db: destination,
+        crypto,
+        legacyKeys: [syntheticKey],
+      })
+      assert.equal(
+        (await repository.getAccount(firstAuth, batch.accounts[0].id)).email,
+        'Person@example.invalid'
+      )
+      assert.equal(
+        (await destination.get('SELECT write_paused FROM managed_owners LIMIT 1')).write_paused,
+        1
+      )
+    } finally {
+      const target = path.resolve(directory)
+      assert.equal(path.dirname(target), path.resolve(tmpdir()))
+      assert.ok(path.basename(target).startsWith('aiomanager-pg-backup-'))
+      await rm(target, { recursive: true, force: true })
+    }
+  }
 )
 
 test('real PostgreSQL commits and rolls back on its checked-out connection', options, async (t) => {

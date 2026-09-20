@@ -17,6 +17,8 @@ import { MembershipEditor } from '@/components/managed/MembershipEditor'
 import { ManagedGroupsPanel } from '@/components/managed/ManagedGroupsPanel'
 import { ManagedGroupAssignment } from '@/components/managed/ManagedGroupAssignment'
 import { ManagedPersonalEditor } from '@/components/managed/ManagedPersonalEditor'
+import { ManagedRuntimeControls } from '@/components/managed/ManagedRuntimeControls'
+import { ManagedAccountOperations } from '@/components/managed/ManagedAccountOperations'
 import { useUnsavedWarning } from '@/components/common/UnsavedWorkGuard'
 
 type ManagedApi = ReturnType<typeof createManagedApi>
@@ -57,6 +59,8 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [assignmentLocked, setAssignmentLocked] = useState(false)
   const [personalAccount, setPersonalAccount] = useState<ManagedAccount | null>(null)
+  const [operationsAccount, setOperationsAccount] = useState<ManagedAccount | null>(null)
+  const [view, setView] = useState<'all' | 'expired'>('all')
   const returnFocus = useRef<HTMLButtonElement | null>(null)
   const restoreFocus = useRef(false)
   // Passwords stay in this transient ref, never in legacy stores/localStorage or
@@ -80,7 +84,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
       try {
         const [summary, page] = await Promise.all([
           api.status(controller.signal),
-          api.accounts(after, controller.signal),
+          api.accounts(after, controller.signal, view),
         ])
         if (sequence !== inventorySequence.current) return
         setStatus(summary)
@@ -106,7 +110,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
         if (sequence === inventorySequence.current) setLoading(false)
       }
     },
-    [api]
+    [api, view]
   )
 
   const discardRequests = useCallback(() => {
@@ -131,11 +135,17 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   }, [loadInventory, discardRequests])
 
   useEffect(() => {
-    if (!editingAccount && !personalAccount && !loading && restoreFocus.current) {
+    if (
+      !editingAccount &&
+      !personalAccount &&
+      !operationsAccount &&
+      !loading &&
+      restoreFocus.current
+    ) {
       returnFocus.current?.focus()
       restoreFocus.current = false
     }
-  }, [editingAccount, personalAccount, loading])
+  }, [editingAccount, personalAccount, operationsAccount, loading])
 
   const replaceAccount = (updated: ManagedAccount) => {
     setAccounts((previous) =>
@@ -244,19 +254,23 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
             <UsersRound aria-hidden="true" /> Managed users
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Prepare your existing clients for group-managed addons.
+            Manage group addons, individual setups, memberships, and verified sync.
           </p>
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm">
-          <ShieldCheck className="h-4 w-4" aria-hidden="true" /> Staging only · provider writes
-          disabled
+          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+          {status?.capabilities.providerWrites ? 'Managed sync available' : 'Staging available'}
         </span>
       </div>
-      <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
-        Development checkpoint: importing saves users on this server but does not sign in to Stremio
-        or change addons. Group activation and automatic expiry are not enabled in this build.
-        Existing accounts and addon features remain in their original tabs.
-      </p>
+      {status && (
+        <ManagedRuntimeControls
+          api={api}
+          status={status}
+          onChanged={() => {
+            void loadInventory()
+          }}
+        />
+      )}
 
       <section
         className="space-y-4 rounded-xl border bg-card p-5"
@@ -477,6 +491,30 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
           placeholder="Email or display name"
           className="w-full rounded-md border bg-background px-3 py-2 text-sm"
         />
+        <label className="block space-y-1 text-sm">
+          <span>System view</span>
+          <select
+            value={view}
+            disabled={
+              loading ||
+              selectedIds.length > 0 ||
+              !!editingAccount ||
+              !!personalAccount ||
+              !!operationsAccount
+            }
+            className="rounded-md border bg-background px-3 py-2"
+            onChange={(event) => setView(event.target.value as 'all' | 'expired')}
+          >
+            <option value="all">All managed users</option>
+            <option value="expired">Expired users</option>
+          </select>
+        </label>
+        {view === 'expired' && (
+          <p className="text-sm text-muted-foreground">
+            Expired users keep their group and saved setup. Set a future expiry or choose lifetime
+            to renew.
+          </p>
+        )}
         {membershipNotice && (
           <p role="status" className="text-sm">
             {membershipNotice}
@@ -496,6 +534,29 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
               updated.forEach(replaceAccount)
               setSelectedIds([])
               setMembershipNotice('Group assignment saved. Staged users remain inactive.')
+              void loadInventory()
+            }}
+          />
+        )}
+        {operationsAccount && (
+          <ManagedAccountOperations
+            key={operationsAccount.id}
+            api={api}
+            account={operationsAccount}
+            enabled={status?.capabilities.providerWrites ?? false}
+            paused={status?.writePaused ?? true}
+            onUpdated={replaceAccount}
+            onRemoved={() => {
+              setOperationsAccount(null)
+              restoreFocus.current = true
+              setMembershipNotice(
+                `Stremio cleanup verified. ${operationsAccount.email} was removed.`
+              )
+              void loadInventory()
+            }}
+            onClose={() => {
+              setOperationsAccount(null)
+              restoreFocus.current = true
               void loadInventory()
             }}
           />
@@ -550,7 +611,8 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                       loading ||
                       assignmentLocked ||
                       editingAccount !== null ||
-                      personalAccount !== null
+                      personalAccount !== null ||
+                      operationsAccount !== null
                     }
                     checked={
                       shownAccounts.some((account) => account.state !== 'offboarding') &&
@@ -579,7 +641,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                   Group
                 </th>
                 <th scope="col" className="p-3">
-                  Membership / expiry (New York)
+                  Membership / expiry
                 </th>
                 <th scope="col" className="p-3">
                   Actions
@@ -599,7 +661,8 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                         assignmentLocked ||
                         account.state === 'offboarding' ||
                         editingAccount !== null ||
-                        personalAccount !== null
+                        personalAccount !== null ||
+                        operationsAccount !== null
                       }
                       onChange={(event) =>
                         setSelectedIds((previous) =>
@@ -616,7 +679,17 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                       ? 'Staged — no changes'
                       : account.state === 'offboarding'
                         ? 'Offboarding'
-                        : 'Active'}
+                        : account.expired
+                          ? 'Expired'
+                          : 'Active'}
+                    {account.state === 'active' && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {account.appliedVersion === account.policyVersion &&
+                        account.appliedTarget === (account.expired ? 'suspended' : 'active')
+                          ? 'Last sync verified'
+                          : 'Sync pending / attention required'}
+                      </p>
+                    )}
                   </td>
                   <td className="p-3">
                     {account.groupId
@@ -629,7 +702,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                       ? 'Lifetime — no expiry'
                       : account.expiry
                         ? new Date(account.expiry.at).toLocaleString('en-US', {
-                            timeZone: 'America/New_York',
+                            timeZone: account.expiry.timezone,
                             timeZoneName: 'short',
                           })
                         : 'Not set'}
@@ -642,6 +715,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                         loading ||
                         editingAccount !== null ||
                         personalAccount !== null ||
+                        operationsAccount !== null ||
                         selectedIds.length > 0 ||
                         account.state === 'offboarding'
                       }
@@ -665,6 +739,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                         loading ||
                         editingAccount !== null ||
                         personalAccount !== null ||
+                        operationsAccount !== null ||
                         selectedIds.length > 0 ||
                         account.state === 'offboarding'
                       }
@@ -675,6 +750,25 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                       }}
                     >
                       Personal addons
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      disabled={
+                        loading ||
+                        !!editingAccount ||
+                        !!personalAccount ||
+                        !!operationsAccount ||
+                        selectedIds.length > 0
+                      }
+                      aria-label={`Manage sync for ${account.email}`}
+                      onClick={(event) => {
+                        returnFocus.current = event.currentTarget
+                        setOperationsAccount(account)
+                      }}
+                    >
+                      {account.state === 'staged' ? 'Activate / preview' : 'Sync / manage'}
                     </Button>
                   </td>
                 </tr>

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { deriveSyncToken } from '@/lib/crypto'
 import type { CredentialUpload } from '@/lib/managed/prepare-import'
 import { parseAddonConfiguration, type ManagedAddon } from '../../shared/addon-config.js'
+import { validMembershipTimezone } from '../../shared/membership-expiry.js'
 
 const issueSchema = z.object({
   row: z.number().int().positive(),
@@ -52,12 +53,13 @@ const accountSchema = z
       .object({
         at: z.number().int(),
         local: z.string(),
-        offset: z.number().int(),
-        timezone: z.literal('America/New_York'),
+        offset: z.number().finite(),
+        timezone: z.string().refine(validMembershipTimezone),
       })
       .nullable(),
     safeMode: z.boolean().nullable(),
     suspendedAt: z.number().int().nonnegative().nullable().default(null),
+    expired: z.boolean().default(false),
     appliedVersion: z.number().int().nullable(),
     appliedTarget: z.enum(['active', 'suspended', 'offboard']).nullable(),
     verifiedAt: z.number().int().nullable(),
@@ -82,6 +84,9 @@ const statusSchema = z.object({
   }),
   writePaused: z.boolean(),
   ownerWritePaused: z.boolean(),
+  writerReady: z.boolean().default(false),
+  lastScanAt: z.number().int().nullable().default(null),
+  lastBackupAt: z.number().int().nullable().default(null),
   safeMode: z.boolean(),
   version: z.number().int().nullable(),
   accounts: z.object({
@@ -89,6 +94,43 @@ const statusSchema = z.object({
     active: z.number().int(),
     offboarding: z.number().int(),
   }),
+})
+
+const activationPreviewSchema = z
+  .object({
+    accountId: z.uuid(),
+    version: z.number().int().positive(),
+    safeMode: z.boolean(),
+    target: z.enum(['active', 'suspended']),
+    beforeCount: z.number().int().nonnegative(),
+    afterCount: z.number().int().nonnegative(),
+    addons: z.array(z.object({ name: z.string(), id: z.string() })).max(200),
+    receipt: z.string().min(1).max(32_768),
+    expiresAt: z.number().int(),
+  })
+  .refine((preview) => preview.addons.length === preview.afterCount)
+const executionSchema = z
+  .object({
+    account: accountSchema.nullable(),
+    removedAt: z.number().int().nullable(),
+    job: z
+      .object({
+        id: z.uuid(),
+        state: z.enum(['pending', 'running', 'retrying', 'verified', 'failed', 'superseded']),
+        target: z.enum(['active', 'suspended', 'offboard']),
+        attempts: z.number().int().nonnegative(),
+        errorCode: z.string().nullable(),
+        dueAt: z.number().int(),
+        updatedAt: z.number().int(),
+      })
+      .nullable(),
+  })
+  .refine((result) => (result.account === null) === (result.removedAt !== null))
+const settingsResultSchema = z.object({
+  version: z.number().int().positive(),
+  writePaused: z.boolean(),
+  safeMode: z.boolean(),
+  replayed: z.boolean(),
 })
 
 const addonsSchema = z.unknown().transform((value, ctx) => {
@@ -202,6 +244,9 @@ const deploymentSchema = z
               'VERIFICATION_MISMATCH',
               'MANIFEST_UNAVAILABLE',
               'DATA_UNREADABLE',
+              'WRITE_PAUSED',
+              'INVALID_STATE',
+              'IDENTITY_MISMATCH',
             ])
             .nullable(),
         })
@@ -232,6 +277,14 @@ export type ManagedImportPreview = z.infer<typeof previewSchema>
 export type ManagedImportBatch = z.infer<typeof batchSchema>
 export type ManagedAccount = z.infer<typeof accountSchema>
 export type ManagedStatus = z.infer<typeof statusSchema>
+export type ManagedActivationPreview = z.infer<typeof activationPreviewSchema>
+export type ManagedExecution = z.infer<typeof executionSchema>
+export type ManagedActivation = { expectedVersion: number; receipt: string; allowEmpty: boolean }
+export type ManagedSettings = {
+  expectedVersion: number | null
+  writePaused: boolean
+  safeMode: boolean
+}
 export type ManagedGroup = z.infer<typeof groupSchema>
 export type ManagedGroupSummary = z.infer<typeof groupSummarySchema>
 export type ManagedPublicationPreview = z.infer<typeof publicationPreviewSchema>
@@ -240,7 +293,7 @@ export type ManagedGroupDraft = { name: string; addons: ManagedAddon[]; safeMode
 export type ManagedPublication = { expectedVersion: number; receipt: string; allowEmpty: boolean }
 export type MembershipChange =
   | { mode: 'lifetime'; expectedVersion: number }
-  | { mode: 'term'; expectedVersion: number; local: string; offset?: number }
+  | { mode: 'term'; expectedVersion: number; local: string; offset?: number; timezone?: string }
 
 const errorMessages = {
   UNAUTHORIZED: 'Your manager session could not be verified. Sign in again.',
@@ -273,12 +326,21 @@ const errorMessages = {
   MANIFEST_ID_MISMATCH: 'The URL now serves a different addon. Review its saved configuration.',
   MANIFEST_TIMEOUT: 'Manifest validation timed out or was cancelled. Try the preview again.',
   MANIFEST_BUSY: 'Manifest validation is busy. Wait for the current checks to finish.',
-  INVALID_EXPIRY: 'Choose a valid New York date and time.',
+  INVALID_EXPIRY: 'Choose a valid expiry date and time.',
+  INVALID_TIMEZONE: 'Choose a valid named timezone.',
   NONEXISTENT_EXPIRY:
-    'That New York time does not exist because the clocks move forward. Choose another time.',
+    'That time does not exist in the selected timezone because the clocks move forward. Choose another time.',
   AMBIGUOUS_EXPIRY:
-    'That New York time occurs twice. Choose the daylight or standard time occurrence.',
+    'That time occurs twice in the selected timezone. Choose the intended occurrence.',
   DATA_UNREADABLE: 'The server cannot decrypt managed data. Restore its matching encryption key.',
+  WRITE_PAUSED: 'Managed sync is disabled on this server.',
+  WRITER_UNAVAILABLE:
+    'The sync writer is recovering or running in another instance. Try again shortly.',
+  MANAGED_ACCOUNT:
+    'This Stremio account is already managed or was removed. Use its managed record.',
+  PROVIDER_FAILURE: 'Stremio could not confirm the operation. Check the account and retry.',
+  INVALID_CREDENTIALS: 'Stremio rejected the saved credentials. Check the email and password.',
+  IDENTITY_MISMATCH: 'The Stremio login belongs to a different account. No addons were changed.',
   FILE_TOO_LARGE: 'The import file exceeds 10 MiB.',
   REQUEST_TOO_LARGE: 'The request exceeds the size limit for this operation.',
   UNSUPPORTED_VERSION: 'This export version is not supported.',
@@ -386,9 +448,56 @@ export function createManagedApi({
   }
   return {
     status: (signal?: AbortSignal) => request('/status', statusSchema, { signal }),
-    accounts: (after = '', signal?: AbortSignal) =>
+    saveSettings: (body: ManagedSettings, key: string, signal?: AbortSignal) =>
+      request('/settings', settingsResultSchema, { body, key, signal }),
+    activationPreview: (
+      id: string,
+      body: { expectedVersion: number; safeMode: boolean | null },
+      signal?: AbortSignal
+    ) =>
+      request(`/accounts/${encodeURIComponent(id)}/activation-preview`, activationPreviewSchema, {
+        body,
+        signal,
+      }),
+    activate: (id: string, body: ManagedActivation, key: string, signal?: AbortSignal) =>
+      request(`/accounts/${encodeURIComponent(id)}/activate`, membershipResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    execution: (id: string, signal?: AbortSignal) =>
+      request(`/accounts/${encodeURIComponent(id)}/execution`, executionSchema, { signal }),
+    reconnect: (
+      id: string,
+      body: { expectedVersion: number; password: string },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/accounts/${encodeURIComponent(id)}/reconnect`, membershipResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    requestSync: (
+      id: string,
+      body: { expectedVersion: number },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/accounts/${encodeURIComponent(id)}/sync`, membershipResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    offboard: (id: string, body: { expectedVersion: number }, key: string, signal?: AbortSignal) =>
+      request(`/accounts/${encodeURIComponent(id)}/offboard`, membershipResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    accounts: (after = '', signal?: AbortSignal, view: 'all' | 'expired' = 'all') =>
       request(
-        `/accounts?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`,
+        `/accounts?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}${view === 'expired' ? '&view=expired' : ''}`,
         accountsSchema,
         { signal }
       ),

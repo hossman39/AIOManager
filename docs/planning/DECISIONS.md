@@ -2,6 +2,13 @@
 
 Recorded 2026-09-19 from the owner's numbered answers. These decisions supersede earlier proposals in this package. V2 questions are deferred. The application remains a fork of AIOManager: existing addon customization and account creation are compatibility requirements.
 
+Update 2026-09-20: the owner requires a selectable named timezone for each dated
+membership. `America/New_York` is the default only. This supersedes every earlier
+New-York-only restriction. Retain the chosen zone and exact UTC cutoff, including
+explicit disambiguation of repeated local times and rejection of nonexistent times.
+The owner authorized continuing through a build ready for their testing without
+further routine confirmations. Production rollout remains separate from testing.
+
 ## Confirmed requirements
 
 | Area | Decision |

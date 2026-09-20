@@ -1,6 +1,32 @@
 # Implementation progress
 
-Updated 2026-09-20. These are foundation increments, not a deployable managed-groups release. No paying accounts, production database, or deployment has been accessed or modified. Backend work and its evidence are recorded in [BACKEND-FOUNDATION.md](BACKEND-FOUNDATION.md) and [MANAGED-STORAGE.md](MANAGED-STORAGE.md). Branch checkpoints/CI do not authorize production rollout.
+Updated 2026-09-20. The managed runtime is now connected in an isolated testing
+candidate. No paying accounts, production database, or production deployment has
+been accessed or modified. Branch checkpoints/CI do not authorize production rollout.
+
+## Current testing increment
+
+Activation with first-sync review, native Stremio transport, deployment-wide writer
+ownership, legacy proxy/Autopilot gates, pause/resume, retries, login repair,
+scheduled expiry, recurring suspension checks, an Expired view, renewal and
+verified offboarding are connected. Memberships support selectable named timezones;
+`America/New_York` is the default. Daily encrypted backups and an offline empty-target
+restore tool are included. See [MANAGED-RUNTIME.md](MANAGED-RUNTIME.md) and the
+[testing walkthrough](../TESTING-MANAGED.md).
+
+Local Windows validation: 275 tests passed, 105 PostgreSQL cases assigned to hosted
+CI; typecheck, lint and production build passed. Both production dependency audits
+report zero findings. New tests include the native HTTP lifecycle, response/body
+timeouts, cross-process writer exclusion, authenticated backup restore/tamper and
+retention, plus the existing 100-account and encrypted restart recovery contracts.
+Browser checks confirm the New York default, selecting/saving/reloading Kathmandu,
+rejection of a New York spring gap, and explicit fall-fold choices. Further browser
+and hosted results are recorded with the final testing checkpoint.
+
+Remaining acceptance is on dedicated Stremio accounts/Android, the owner's actual
+export and VPS, and the production soak/release gates. The test instance has a
+separate database/key and starts new managers paused. Historical increments below
+describe the boundaries when they were recorded, not the current runtime.
 
 ## Completed locally
 
@@ -83,7 +109,7 @@ Local Windows / Node 24.14.0 / npm 11.9.0:
 
 The first lockfile regeneration removed three stale packages absent from the existing manifest (`@tanstack/react-virtual`, `@tanstack/virtual-core`, `glass-refraction`). Subsequent targeted dependency and backend changes are recorded in BACKEND-FOUNDATION.md; its current production audit supersedes the original dependency counts. No bulk force-fix was used.
 
-## Next engineering work and release blockers
+## Prior checkpoint handoff (superseded by the testing increment above)
 
 1. Verify each new increment in hosted CI. Keep publishing manual/fork-owned; no image has been published. Dated/lifetime membership controls are implemented, not live expiry enforcement.
 2. Integrate the tested execution engine with deployment-wide single-writer ownership, a bounded native provider adapter, shared budgets and every existing writer's ownership/expiry gate. The injected runner and job store do not by themselves authorize activation.

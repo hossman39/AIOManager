@@ -6,6 +6,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { buildServer } from '../server/app.js'
 import { createManagedManifestService } from '../server/managed/manifests.js'
 import { configuredAddon } from '../tests/fixtures/addon-config.mjs'
+import { fakeStremio } from '../tests/fixtures/stremio.mjs'
+import { createStremioProvider } from '../server/managed/stremio.js'
 
 const directory = await mkdtemp(path.join(tmpdir(), 'aiomanager-ui-rehearsal-'))
 const noProvider = async () => {
@@ -32,7 +34,14 @@ async function close() {
   }
 }
 try {
-  const groupRehearsal = process.argv.includes('--seed-groups')
+  const liveDemo = process.argv.includes('--live')
+  const groupRehearsal = liveDemo || process.argv.includes('--seed-groups')
+  const fake = fakeStremio(
+    Array.from({ length: 3 }, (_, i) => ({
+      email: `group-user-${i + 1}@example.invalid`,
+      password: 'Synthetic-client-only!',
+    }))
+  )
   const manifestService = createManagedManifestService({
     resolve: async (host) => {
       if (!groupRehearsal || !['addon.example.invalid', 'cinemeta.example.invalid'].includes(host))
@@ -58,11 +67,14 @@ try {
     },
   })
   app = await buildServer({
-    env: {},
+    env: { MANAGED_WRITES_ENABLED: String(liveDemo) },
     dataDir: directory,
     encryptionKey: 'synthetic-ui-key-only',
     logger: false,
-    backgroundWorkers: false,
+    backgroundWorkers: liveDemo,
+    ...(liveDemo
+      ? { stremioProvider: createStremioProvider({ fetch: fake.fetch, spacingMs: 50 }) }
+      : {}),
     fetch: noProvider,
     httpClient: { post: noProvider },
     manifestService,
@@ -95,6 +107,62 @@ try {
       },
     })
     if (staged.statusCode !== 201) throw new Error('Synthetic staging failed')
+    if (liveDemo) {
+      const post = async (url, payload) => {
+        const response = await app.inject({
+          method: 'POST',
+          url: `/api/managed${url}`,
+          headers: { ...headers, 'idempotency-key': randomUUID() },
+          payload,
+        })
+        if (response.statusCode >= 400)
+          throw new Error(`Synthetic seed failed: ${url}: ${response.statusCode}`)
+        return response.json()
+      }
+      const group = (
+        await post('/groups', {
+          name: 'Demo group',
+          addons: [{ ...configuredAddon(), flags: { enabled: true, protected: false } }],
+          safeMode: null,
+        })
+      ).group
+      const preview = await post(`/groups/${group.id}/preview`, { expectedVersion: group.version })
+      await post(`/groups/${group.id}/publish`, {
+        expectedVersion: group.version,
+        receipt: preview.receipt,
+      })
+      for (const [index, row] of staged.json().accounts.entries()) {
+        await post('/accounts/assign-group', {
+          groupId: group.id,
+          accounts: [{ id: row.id, expectedVersion: 1 }],
+        })
+        if (index > 0) {
+          const member = await post(
+            `/accounts/${row.id}/membership`,
+            index === 1
+              ? { expectedVersion: 2, mode: 'lifetime' }
+              : {
+                  expectedVersion: 2,
+                  mode: 'term',
+                  local: '2020-01-01T12:00',
+                  timezone: 'America/New_York',
+                }
+          )
+          if (index === 2) {
+            const review = await post(`/accounts/${row.id}/activation-preview`, {
+              expectedVersion: member.account.version,
+              safeMode: null,
+            })
+            await post(`/accounts/${row.id}/activate`, {
+              expectedVersion: review.version,
+              receipt: review.receipt,
+              allowEmpty: true,
+            })
+          }
+        }
+      }
+      await post('/settings', { expectedVersion: 1, writePaused: false, safeMode: true })
+    }
     loginQuery = `?id=${owner}`
     console.log(`Synthetic test login password: ${password}`)
   }

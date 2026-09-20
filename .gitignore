@@ -73,3 +73,7 @@ data/
 *.db
 *.db-shm
 *.db-wal
+*.writer-lock
+*.writer-lock-journal
+*.aiobackup
+server_fallback_keys.json
