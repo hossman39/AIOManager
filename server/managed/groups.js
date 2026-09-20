@@ -1,8 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { parseAddonConfiguration, combineAddonLayers } from '../../shared/addon-config.js'
+import {
+  parseAddonConfiguration,
+  addonUrlIdentity,
+  MAX_MANAGED_ADDONS,
+  MAX_ADDON_CONFIG_BYTES,
+} from '../../shared/addon-config.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
+import { createGroupPublicationRepository } from './publication.js'
 
 const version = z.number().int().positive()
 const draftInput = z.strictObject({
@@ -36,7 +42,7 @@ const checkedAddons = (value) => {
   return result.addons
 }
 
-/** Authenticated configuration only. No provider IO or activation is possible. */
+/** Draft/assignment APIs are passive; publication needs an explicit trusted validator. */
 export function createManagedGroupRepository({
   db,
   crypto,
@@ -45,6 +51,7 @@ export function createManagedGroupRepository({
   idempotent,
   publicAccount,
   jobs,
+  validateManifests,
 }) {
   const storedAddons = (blob, binding) => {
     const result = parseAddonConfiguration(crypto.open(blob, binding))
@@ -75,18 +82,46 @@ export function createManagedGroupRepository({
       return draft(row)
     }
     const revision = await connection.get(
-      'SELECT config_enc FROM managed_group_revisions WHERE owner_id = $1 AND group_id = $2 AND revision = $3',
+      'SELECT config_enc, payload_digest FROM managed_group_revisions WHERE owner_id = $1 AND group_id = $2 AND revision = $3',
       [row.owner_id, row.id, row.published_revision]
     )
     if (!revision) throw new ManagedError('DATA_UNREADABLE')
-    return storedAddons(
+    const addons = storedAddons(
       revision.config_enc,
       context(row.owner_id, row.id, `group-revision:${row.published_revision}`)
     )
+    if (
+      !equalSecret(
+        revision.payload_digest,
+        crypto.fingerprint(addons, context(row.owner_id, row.id, 'group-payload'))
+      )
+    )
+      throw new ManagedError('DATA_UNREADABLE')
+    return addons
+  }
+  // Both inputs have already passed checkedAddons/storedAddons. Compile shared
+  // membership once so a large cohort does not repeatedly parse/copy its template.
+  function layerGuard(groupAddons) {
+    const identities = new Set(groupAddons.map((addon) => addonUrlIdentity(addon.transportUrl)))
+    const groupBytes = Buffer.byteLength(JSON.stringify(groupAddons))
+    return (personalAddons) => {
+      const personalBytes = Buffer.byteLength(JSON.stringify(personalAddons))
+      const totalBytes = !groupAddons.length
+        ? personalBytes
+        : !personalAddons.length
+          ? groupBytes
+          : groupBytes + personalBytes - 1
+      if (
+        groupAddons.length + personalAddons.length > MAX_MANAGED_ADDONS ||
+        totalBytes > MAX_ADDON_CONFIG_BYTES
+      )
+        throw new ManagedError('ADDON_CONFIG_TOO_LARGE')
+      if (personalAddons.some((addon) => identities.has(addonUrlIdentity(addon.transportUrl))))
+        throw new ManagedError('ADDON_LAYER_CONFLICT')
+    }
   }
   function compatible(groupAddons, personalAddons) {
-    const result = combineAddonLayers(groupAddons, personalAddons)
-    if (!result.ok) throw new ManagedError(result.code)
+    layerGuard(groupAddons)(personalAddons)
   }
   function publicGroup(row, ownerRow, includeDraft = false) {
     const addons = draft(row)
@@ -113,6 +148,22 @@ export function createManagedGroupRepository({
   }
 
   return {
+    ...createGroupPublicationRepository({
+      db,
+      crypto,
+      authorize,
+      ownerTransaction,
+      idempotent,
+      jobs,
+      validateManifests,
+      group,
+      draft,
+      personal,
+      effectiveGroup,
+      layerGuard,
+      publicGroup,
+      audit,
+    }),
     async createGroup(auth, input, key) {
       const value = parse(createInput, input)
       value.addons = checkedAddons(value.addons)
@@ -291,6 +342,7 @@ export function createManagedGroupRepository({
           const destinationAddons = destination
             ? await effectiveGroup(tx, destination, 'staged')
             : null
+          const destinationGuard = destinationAddons ? layerGuard(destinationAddons) : null
           const accounts = []
           for (const expected of value.accounts) {
             const row = await tx.get(
@@ -304,7 +356,7 @@ export function createManagedGroupRepository({
               throw new ManagedError('INVALID_STATE')
             if (destination && row.state === 'active' && destination.published_revision === null)
               throw new ManagedError('GROUP_NOT_PUBLISHED')
-            if (destinationAddons) compatible(destinationAddons, personal(row))
+            if (destinationGuard) destinationGuard(personal(row))
             if (row.group_id === value.groupId) {
               accounts.push({ account: publicAccount(row), jobId: null })
               continue

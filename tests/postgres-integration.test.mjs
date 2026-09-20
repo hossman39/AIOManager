@@ -7,6 +7,7 @@ import { managedStorageContract, prepareManagedFixture } from './managed-contrac
 import { managedJobContract } from './managed-job-contract.mjs'
 import { managedMembershipContract } from './managed-membership-contract.mjs'
 import { managedGroupsContract } from './managed-groups-contract.mjs'
+import { managedPublicationContract } from './managed-publication-contract.mjs'
 
 const connectionString = process.env.AIO_TEST_POSTGRES_URL
 const options = { skip: !connectionString }
@@ -50,6 +51,9 @@ managedMembershipContract('PostgreSQL membership', options, async (t, fixtureOpt
   prepareManagedFixture(await fixture(t), fixtureOptions)
 )
 managedGroupsContract('PostgreSQL group configuration', options, async (t) =>
+  prepareManagedFixture(await fixture(t))
+)
+managedPublicationContract('PostgreSQL group publication', options, async (t) =>
   prepareManagedFixture(await fixture(t))
 )
 

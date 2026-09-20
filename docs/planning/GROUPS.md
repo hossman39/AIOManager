@@ -56,6 +56,28 @@ until the single-writer service and every legacy-writer gate are integrated.
   enabling activation. Finish indexed expiry scanning and overdue status as part
   of this integration. Expiry never removes retained descriptors.
 
+### G2 transaction and validation protocol
+
+Publication preparation validates manifests through a trusted injected adapter
+outside a database transaction, then rechecks the draft version and cohort. It
+returns a short-lived encrypted receipt bound to owner/group, draft digest, group
+version, cohort policies/targets, safe-mode default, and validation time. Missing
+validation adapter means publication is unavailable, not implicitly validated.
+The production HTTP/UI publication path remains absent until that adapter is ready.
+
+Commit uses the existing request-idempotency transaction. A committed retry replays
+before checking receipt age, so an expired preview cannot hide a successful prior
+publication. New work rejects stale/invalid receipts, changed cohorts, conflicts,
+and unconfirmed empty/all-disabled drafts. Snapshot at most 1,000 group members in
+one bounded transaction for this implementation; report the limit explicitly.
+
+A changed publication advances the group version/revision and each active member's
+policy/record version, persists all jobs and an encrypted cohort, and audits the
+deployment atomically. Staged/offboarding members receive no publication jobs.
+An unchanged published addon configuration is a no-op, not an automatic drift
+rewrite; explicit reconciliation is a separate operation. Progress reports the
+recorded jobs, and does not present a stale pending job as the current policy.
+
 ## Tests required for each slice
 
 Run common contracts on SQLite and real PostgreSQL: tenancy, encryption, exact URL
@@ -86,6 +108,28 @@ and zero provider calls. The 100-user passive assignment took 43–44 ms in isol
 local runs and 162 ms while the other verification processes competed for CPU.
 These are single synthetic samples, not p95 measurements or provider throughput.
 
-The next increment is G2 publication persistence. Trusted manifest fetching,
-safe-mode projection against a fresh provider read, and every existing writer's
-gate remain required before enabling any account.
+G1 also passed all five hosted jobs, including 50 real PostgreSQL cases, in
+[run 35485143282](https://github.com/hossman39/AIOManager/actions/runs/35485143282).
+
+## G2 persistence evidence
+
+Internal preview/publication/deployment methods now implement the protocol above.
+The application does not supply a trusted validator or expose publication routes
+yet. Synthetic tests inject validation; no provider collection is read or written.
+Published payloads are checked against their authenticated digests when read.
+
+Local verification: 181 passed, 70 PostgreSQL cases reserved for hosted CI, zero
+failures. Typecheck, lint, and build passed. Twenty publication contract cases
+run on both database engines; an additional file-backed SQLite restart test
+proves an already committed publication replays after preview expiry, even when
+the restarted repository has no validator. Tests cover stale drafts/cohorts,
+expiry transitions, lifetime, empty-publication consent, personal conflicts,
+concurrent delivery, superseded progress, and rollback after a late failure.
+
+Isolated synthetic preview plus publication samples were 12-16 ms for 40 users,
+19-20 ms for 100, and 226-238 ms for 1,000. They use an immediate fake validator
+and no provider IO: these are not p95, VPS, or remote rollout measurements.
+
+Trusted manifest fetching, authoring UI, safe-mode projection against a fresh
+provider read, and every existing writer's gate remain required before enabling
+any account.

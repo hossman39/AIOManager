@@ -16,6 +16,7 @@ Updated 2026-09-19. These are foundation increments, not a deployable managed-gr
 - Added regression coverage for legacy sync claim races, read-side migration races, and preventing deletion/reclaim of a manager identity that owns managed data.
 - Added explicit dated/lifetime membership controls, shared New York cutoff resolution, additive migration 2, versioned retry-safe saves, and transactional renewal-job scheduling. Imported unset memberships remain distinct. Staged edits remain passive; no scheduler/provider writer is enabled. See [MEMBERSHIPS.md](MEMBERSHIPS.md).
 - Added encrypted group draft/personal-addon APIs and atomic bulk assignment with shared descriptor validation. Existing customization and configured URL case are retained; collisions require explicit resolution. No group publication, group UI or activation is enabled yet. See [GROUPS.md](GROUPS.md).
+- Added internal group publication persistence: expiring previews, immutable revisions, atomic cohort/job creation, retry-safe replay, and recorded deployment progress. A trusted manifest adapter and HTTP/UI integration are still required; no provider worker is enabled.
 
 ## Current local evidence
 
@@ -29,8 +30,10 @@ dependency audits report zero known findings. Synthetic 100-account staging/inve
 file-backed account/job/snapshot restart recovery pass; these are not provider
 throughput or real-device measurements.
 
-The next G1 group-storage increment passes 160 local tests, with 50 PostgreSQL
-cases assigned to hosted CI. Its evidence and remaining publication work are in
+G1 group storage passed 160 local tests and all five hosted jobs, including 50
+PostgreSQL cases, in [run 35485143282](https://github.com/hossman39/AIOManager/actions/runs/35485143282).
+G2 publication persistence passes 181 local tests, with 70 PostgreSQL cases
+assigned to hosted CI. Its evidence and remaining integration work are in
 [GROUPS.md](GROUPS.md). A custom sync-server path mismatch in the managed client
 was also corrected and covered by a regression test.
 

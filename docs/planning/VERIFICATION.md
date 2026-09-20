@@ -24,6 +24,7 @@ Build a server factory that can initialize routes without automatically starting
 | Expiry dates | Before/at/after exact New York cutoff; nonexistent/repeated DST wall times; leap day; no date | Deterministic entitlement; no day rounding, inferred grace, or early expiry |
 | Expiry retention | Protected/default/personal addons; manually disabled entries; remote refresh; restart; repeated suspension | All addons effectively disabled; saved URLs, configuration, order, and manual preferences retained; no addon deletion |
 | Expiry races | Expiry versus group publish, renewal, assignment, retries, in-flight requests, server downtime | Final state converges to current policy; pending/error status remains truthful |
+| Clock rollback | Server time moves backward after expiry was observed or suspension verified | Suspension cannot be lifted by group/personal changes or a backward clock; only an explicit membership renewal changes the entitlement |
 | Renewal | Before cutoff; after suspension; while disabling is queued; missing/changed group; edits while expired | Current group/personal setup applied; intentionally disabled entries stay disabled; no empty fallback |
 | Offboarding | Cleanup rejected, timeout, stale queued work, verified empty remote collection | Keep account/credentials pending until cleanup verified; only then delete; never revive deleted account |
 | Read failures | 401/403, malformed JSON, missing result/addons, 429, 5xx, DNS/network timeout | Errors stay distinct from a valid empty collection; no destructive fallback |
@@ -92,6 +93,7 @@ Resolve baseline lint failures. Triage dependency findings for actual runtime re
 - [ ] Safe-mode defaults, exceptions, scope, and expiry precedence have explicit acceptance tests.
 - [ ] Every existing writer is integrated or explicitly disabled for activated clients.
 - [ ] Policy/expiry races, timeout-after-acceptance, and restart recovery pass fault tests.
+- [ ] Observed expiry remains suspended across a backward clock adjustment and restart, until explicitly renewed.
 - [ ] No account/addon/history deletion is part of expiry; disabled records survive sync/restart and manual disable preferences survive renewal.
 - [ ] Explicit lifetime has no cutoff, remains group-managed, survives upgrade/restart, and renews expired users without altering saved preferences; unset imports are not silently lifetime.
 - [ ] Performance and soak evidence meet agreed budgets or documented revised targets.

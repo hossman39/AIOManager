@@ -23,8 +23,14 @@ export function parseImportBody(body) {
   return parseCredentialImport(JSON.stringify(body))
 }
 
-/** No provider transport is accepted by this repository: staging cannot activate. */
-export function createManagedRepository({ db, crypto, legacyKeys, now = Date.now }) {
+/** Staging cannot activate; only publication preparation may invoke a trusted manifest validator. */
+export function createManagedRepository({
+  db,
+  crypto,
+  legacyKeys,
+  now = Date.now,
+  validateManifests,
+}) {
   const authorize = (auth) => authenticateManager(db, auth, legacyKeys)
   const jobs = createManagedJobStore({ db, crypto, now })
 
@@ -147,6 +153,7 @@ export function createManagedRepository({ db, crypto, legacyKeys, now = Date.now
       idempotent,
       publicAccount,
       jobs,
+      validateManifests,
     }),
     authorize,
     async setMembership(auth, id, input, requestKey) {

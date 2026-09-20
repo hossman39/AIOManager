@@ -23,6 +23,23 @@ const definitions = {
     'A personal addon URL is also present in the group. Resolve the duplicate explicitly.',
   ],
   GROUP_NOT_PUBLISHED: [409, 'Active users require a published destination group.'],
+  PUBLICATION_UNAVAILABLE: [
+    503,
+    'Group publication is unavailable until trusted manifest validation is configured.',
+  ],
+  MANIFEST_UNAVAILABLE: [
+    422,
+    'A required addon manifest could not be validated. No revision was published.',
+  ],
+  PREVIEW_STALE: [
+    409,
+    'This publication preview is invalid, expired, or changed. Prepare it again.',
+  ],
+  GROUP_TOO_LARGE: [422, 'This publication exceeds the 1,000-member transaction limit.'],
+  EMPTY_PUBLICATION_CONFIRMATION: [
+    409,
+    'Publishing an empty or entirely disabled addon setup requires an explicit choice.',
+  ],
   WRITE_PAUSED: [409, 'Managed writes are paused.'],
   LEASE_LOST: [409, 'The job lease is no longer current.'],
   DATA_UNREADABLE: [503, 'Managed data cannot be decrypted. Restore the matching key and data.'],

@@ -37,7 +37,11 @@ export async function prepareGroupFixture(storage, count = 3) {
           id: target.id,
           purpose: 'group-revision:1',
         }),
-        'synthetic-digest',
+        crypto.fingerprint(target.draft, {
+          owner: firstAuth.owner,
+          id: target.id,
+          purpose: 'group-payload',
+        }),
         now(),
       ]
     )
