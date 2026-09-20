@@ -332,6 +332,29 @@ test('group client sends scoped versioned APIs and retains full customization wi
   assert.equal(last()?.url, `/api/managed/deployments/${deploymentId}`)
 })
 
+test('latest rollout reads are group-scoped and distinguish unpublished from malformed progress', async () => {
+  let data: unknown = { deployment: publicDeployment }
+  const api = createManagedApi({
+    ...auth,
+    fetch: async (url, options) => {
+      assert.equal(url, `/api/managed/groups/${groupId}/deployment`)
+      assert.equal(options?.method, 'GET')
+      return reply(data)
+    },
+  })
+  assert.deepEqual(await api.groupDeployment(groupId), publicDeployment)
+  data = { deployment: null }
+  assert.equal(await api.groupDeployment(groupId), null)
+  for (const invalid of [
+    {},
+    { deployment: {} },
+    { deployment: { ...publicDeployment, groupId: publicAccount.id } },
+  ]) {
+    data = invalid
+    await assert.rejects(api.groupDeployment(groupId), { code: 'INVALID_RESPONSE' })
+  }
+})
+
 test('ambiguous publication delivery does not retry automatically and exact retry keeps the receipt and key', async () => {
   const calls: { key: string | null; body: unknown }[] = []
   const api = createManagedApi({

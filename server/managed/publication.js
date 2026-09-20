@@ -137,7 +137,7 @@ export function createGroupPublicationRepository({
     }
   }
 
-  return {
+  const repository = {
     async previewGroupPublication(auth, id, input, { signal } = {}) {
       const value = parse(previewInput, input)
       const owner = await authorize(auth)
@@ -311,6 +311,20 @@ export function createGroupPublicationRepository({
         })
       )
     },
+    async getGroupDeployment(auth, id) {
+      const owner = await authorize(auth)
+      // One statement binds this read to the published revision at read time.
+      const current = await db.get(
+        `SELECT g.published_revision, d.id AS deployment_id FROM managed_groups g
+        LEFT JOIN managed_deployments d ON d.owner_id = g.owner_id AND d.group_id = g.id AND d.revision = g.published_revision
+        WHERE g.owner_id = $1 AND g.id = $2`,
+        [owner, id]
+      )
+      if (!current) throw new ManagedError('NOT_FOUND')
+      if (current.published_revision === null) return { deployment: null }
+      if (!current.deployment_id) throw new ManagedError('DATA_UNREADABLE')
+      return { deployment: await repository.getDeployment(auth, current.deployment_id) }
+    },
     async getDeployment(auth, id) {
       const owner = await authorize(auth)
       const row = await db.get(
@@ -363,4 +377,5 @@ export function createGroupPublicationRepository({
       }
     },
   }
+  return repository
 }

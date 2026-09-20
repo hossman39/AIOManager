@@ -31,6 +31,9 @@ transport. No Stremio accounts are created or modified.
 - `managed-api.test.mjs`: authentication, response redaction, size limits, cross-owner denial, passive staging, encrypted file-backed restart, and legacy identity claim/delete/read-migration races.
 - `managed-client.test.ts`: browser credential allowlisting, auth/redirect/error handling, cancellation, membership response validation and exact retry/offset requests.
 - `addon-config.test.mjs`: full descriptor/customization retention, exact configured URL identity, explicit collisions, invalid input, and count/byte/depth limits.
+- `managed-addon-draft.test.ts`: immutable metadata/catalog/Cinemeta edits, protected removal, exact URL replacement and retained manual enabled flags.
+- `managed-submission.test.ts`: cloned retry payload/key and explicit versus ambiguous failure classification. Browser rehearsals separately exercise the React controls.
+- `managed-navigation.test.ts`: independent editor aggregation/cleanup and the installed router's push/replace/Back/Forward blockers. Actual DOM/focus/logout/mobile checks are browser rehearsals, not simulated by these unit tests.
 - `managed-groups.test.mjs` / `managed-groups-contract.mjs`: encrypted drafts, personal addons, atomic 100-user passive assignment, published-only active transfers, tenancy, version conflicts, retry/restart, and rollback after injected failure. Published/enrolled fixtures here are synthetic internal state, not real provider enrollment.
 - `managed-publication.test.mjs` / `managed-publication-contract.mjs`: atomic immutable revisions and rollout cohorts, trusted-validator boundary, stale/expired previews, explicit empty consent, mixed entitlement, rollback, concurrent delivery, superseded progress, file-backed replay, and synthetic 40/100/1,000-member publication. No real manifest adapter or provider writer is used.
 - `managed-manifests.test.mjs`: bounded read-only manifest validation, safe addresses and pinned DNS, exact private-origin rules, redirects/rebinding, compressed/invalid/partial bodies, cancellation/deadlines/shutdown, global queue limits, and native loopback HTTP. Tests inject synthetic DNS/transports and never call addon hosts. Additional HTTP/client cases cover the connected publication API and replay after restart.
@@ -50,7 +53,15 @@ rehearsals; see [membership evidence](../docs/planning/MEMBERSHIPS.md). Repeat w
 temporary test data. Native OS picker interaction still needs hands-on checking.
 
 Provider execution and all legacy-writer gates, persistent expiry scanning,
-activation, group/personal UI, offboarding, daily backups,
+activation, offboarding, daily backups,
 and Android/provider verification remain implementation work. The targeted
 `better-sqlite3` rebuild is required for native tests; a scripts-disabled install
 alone is insufficient. See [release gates](../docs/planning/VERIFICATION.md).
+
+Group/personal authoring has a separate safe rehearsal:
+`node scripts/ui-rehearsal.mjs --seed-groups`. Only the two synthetic `.invalid`
+manifest hosts in that helper resolve, using fake in-process transports; all
+provider requests remain disabled. Use an interactive terminal and enter `stop`
+to remove its temporary database (it also cleans up after 15 minutes). See
+[editor evidence](../docs/planning/GROUP-EDITOR.md). Group rollout discovery is
+covered on both engines and by authenticated HTTP/client/restart cases.

@@ -104,6 +104,7 @@ test('every managed API requires server-verified owner credentials', async (t) =
       },
       { method: 'POST', url: `/api/managed/groups/${randomUUID()}/publish`, payload: {} },
       { method: 'GET', url: `/api/managed/deployments/${randomUUID()}` },
+      { method: 'GET', url: `/api/managed/groups/${randomUUID()}/deployment` },
       { method: 'POST', url: '/api/managed/accounts/assign-group', payload: {} },
       { method: 'GET', url: `/api/managed/accounts/${randomUUID()}/personal-addons` },
       {
@@ -609,6 +610,15 @@ test('publication HTTP commits a scoped mixed cohort, reports queued work, and r
     headers: headers(),
   }
   const progress = await app.inject(progressRequest)
+  const latestRequest = {
+    url: `/api/managed/groups/${published.json().group.id}/deployment`,
+    headers: headers(),
+  }
+  assert.deepEqual((await app.inject(latestRequest)).json(), { deployment: progress.json() })
+  assert.equal(
+    (await app.inject({ ...latestRequest, headers: headers(secondAuth) })).statusCode,
+    404
+  )
   assert.equal(progress.statusCode, 200, progress.body)
   assert.equal(progress.json().counts.pending, 2)
   assert.equal(progress.json().counts.verified, 0)
@@ -638,6 +648,9 @@ test('publication HTTP commits a scoped mixed cohort, reports queued work, and r
   assert.equal(replayed.json().deploymentId, published.json().deploymentId)
   assert.equal((await restarted.db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 2)
   assert.deepEqual((await restarted.app.inject(progressRequest)).json(), progress.json())
+  assert.deepEqual((await restarted.app.inject(latestRequest)).json(), {
+    deployment: progress.json(),
+  })
   assert.equal(reads, 1)
   assert.equal(networkCalls(), 0)
 })

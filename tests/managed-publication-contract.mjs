@@ -72,6 +72,64 @@ export function managedPublicationContract(prefix, options, fixture) {
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
 
   check(
+    'published rollout discovery is scoped, read-only and follows the published revision',
+    async (storage) => {
+      const { repository, group, publish, validationCalls } =
+        await preparePublicationFixture(storage)
+      assert.deepEqual(await repository.getGroupDeployment(firstAuth, group.id), {
+        deployment: null,
+      })
+      await assert.rejects(repository.getGroupDeployment(secondAuth, group.id), {
+        code: 'NOT_FOUND',
+      })
+      await assert.rejects(repository.getGroupDeployment(firstAuth, randomUUID()), {
+        code: 'NOT_FOUND',
+      })
+      const first = await publish()
+      const reads = validationCalls()
+      assert.deepEqual(
+        (await repository.getGroupDeployment(firstAuth, group.id)).deployment,
+        await repository.getDeployment(firstAuth, first.deploymentId)
+      )
+      assert.equal(validationCalls(), reads)
+      const saved = await repository.saveGroupDraft(
+        firstAuth,
+        group.id,
+        {
+          expectedVersion: first.group.version,
+          name: 'Updated draft',
+          safeMode: null,
+          addons: [{ ...first.group.draft[0], flags: { enabled: false } }],
+        },
+        randomUUID()
+      )
+      assert.equal(
+        (await repository.getGroupDeployment(firstAuth, group.id)).deployment.revision,
+        1
+      )
+      const next = await publish({ allowEmpty: true })
+      const found = (await repository.getGroupDeployment(firstAuth, group.id)).deployment
+      assert.equal(found.id, next.deploymentId)
+      assert.equal(found.revision, 2)
+      assert.equal((await repository.getDeployment(firstAuth, first.deploymentId)).revision, 1)
+      assert.equal((await storage.db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+      assert.ok(saved.group.version > first.group.version)
+    }
+  )
+
+  check(
+    'published rollout discovery fails closed when the recorded deployment is missing',
+    async (storage) => {
+      const { repository, group, publish } = await preparePublicationFixture(storage)
+      const result = await publish()
+      await storage.db.run('DELETE FROM managed_deployments WHERE id = $1', [result.deploymentId])
+      await assert.rejects(repository.getGroupDeployment(firstAuth, group.id), {
+        code: 'DATA_UNREADABLE',
+      })
+    }
+  )
+
+  check(
     'publication cannot proceed without explicit trusted manifest validation',
     async (storage) => {
       const { repository, group, db } = await prepareGroupFixture(storage)

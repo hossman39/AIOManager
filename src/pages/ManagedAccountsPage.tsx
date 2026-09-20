@@ -7,12 +7,17 @@ import {
   type ManagedImportBatch,
   type ManagedImportPreview,
   type ManagedStatus,
+  type ManagedGroupSummary,
 } from '@/api/managed'
 import { MAX_CREDENTIAL_IMPORT_BYTES } from '@/lib/managed/credential-import'
 import { prepareCredentialUpload, type CredentialUpload } from '@/lib/managed/prepare-import'
 import { useSyncStore } from '@/store/syncStore'
 import { Button } from '@/components/ui/button'
 import { MembershipEditor } from '@/components/managed/MembershipEditor'
+import { ManagedGroupsPanel } from '@/components/managed/ManagedGroupsPanel'
+import { ManagedGroupAssignment } from '@/components/managed/ManagedGroupAssignment'
+import { ManagedPersonalEditor } from '@/components/managed/ManagedPersonalEditor'
+import { useUnsavedWarning } from '@/components/common/UnsavedWorkGuard'
 
 type ManagedApi = ReturnType<typeof createManagedApi>
 const describeError = (error: unknown) =>
@@ -48,6 +53,10 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   const [editingAccount, setEditingAccount] = useState<ManagedAccount | null>(null)
   const [editorRevision, setEditorRevision] = useState(0)
   const [membershipNotice, setMembershipNotice] = useState('')
+  const [groups, setGroups] = useState<ManagedGroupSummary[]>([])
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [assignmentLocked, setAssignmentLocked] = useState(false)
+  const [personalAccount, setPersonalAccount] = useState<ManagedAccount | null>(null)
   const returnFocus = useRef<HTMLButtonElement | null>(null)
   const restoreFocus = useRef(false)
   // Passwords stay in this transient ref, never in legacy stores/localStorage or
@@ -58,6 +67,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   const importAbort = useRef<AbortController | null>(null)
   const inventorySequence = useRef(0)
   const importSequence = useRef(0)
+  useUnsavedWarning(hasPending || busy === 'stage')
 
   const loadInventory = useCallback(
     async (after = '') => {
@@ -121,11 +131,11 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   }, [loadInventory, discardRequests])
 
   useEffect(() => {
-    if (!editingAccount && !loading && restoreFocus.current) {
+    if (!editingAccount && !personalAccount && !loading && restoreFocus.current) {
       returnFocus.current?.focus()
       restoreFocus.current = false
     }
-  }, [editingAccount, loading])
+  }, [editingAccount, personalAccount, loading])
 
   const replaceAccount = (updated: ManagedAccount) => {
     setAccounts((previous) =>
@@ -415,6 +425,16 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
         )}
       </section>
 
+      {status?.capabilities.groupPublication && (
+        <ManagedGroupsPanel
+          api={api}
+          onGroupsChanged={setGroups}
+          onAccountsChanged={() => {
+            void loadInventory()
+          }}
+        />
+      )}
+
       <section
         className="space-y-4 rounded-xl border bg-card p-5"
         aria-labelledby="managed-inventory-heading"
@@ -432,7 +452,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
           </div>
           <Button
             variant="outline"
-            disabled={loading}
+            disabled={loading || assignmentLocked || selectedIds.length > 0}
             onClick={() => {
               void loadInventory()
             }}
@@ -461,6 +481,36 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
           <p role="status" className="text-sm">
             {membershipNotice}
           </p>
+        )}
+        {selectedIds.length > 0 && (
+          <ManagedGroupAssignment
+            accounts={accounts.filter((account) => selectedIds.includes(account.id))}
+            groups={groups}
+            api={api}
+            onLock={setAssignmentLocked}
+            onClear={() => {
+              setSelectedIds([])
+              void loadInventory()
+            }}
+            onSaved={(updated) => {
+              updated.forEach(replaceAccount)
+              setSelectedIds([])
+              setMembershipNotice('Group assignment saved. Staged users remain inactive.')
+              void loadInventory()
+            }}
+          />
+        )}
+        {personalAccount && (
+          <ManagedPersonalEditor
+            key={personalAccount.id}
+            api={api}
+            account={personalAccount}
+            onSaved={replaceAccount}
+            onClose={() => {
+              setPersonalAccount(null)
+              restoreFocus.current = true
+            }}
+          />
         )}
         {editingAccount && (
           <MembershipEditor
@@ -493,6 +543,33 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
             <thead className="bg-muted">
               <tr>
                 <th scope="col" className="p-3">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all shown eligible users"
+                    disabled={
+                      loading ||
+                      assignmentLocked ||
+                      editingAccount !== null ||
+                      personalAccount !== null
+                    }
+                    checked={
+                      shownAccounts.some((account) => account.state !== 'offboarding') &&
+                      shownAccounts
+                        .filter((account) => account.state !== 'offboarding')
+                        .every((account) => selectedIds.includes(account.id))
+                    }
+                    onChange={(event) =>
+                      setSelectedIds(
+                        event.target.checked
+                          ? shownAccounts
+                              .filter((account) => account.state !== 'offboarding')
+                              .map((account) => account.id)
+                          : []
+                      )
+                    }
+                  />
+                </th>
+                <th scope="col" className="p-3">
                   Email / display name
                 </th>
                 <th scope="col" className="p-3">
@@ -512,6 +589,27 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
             <tbody>
               {shownAccounts.map((account) => (
                 <tr key={account.id} className="border-t">
+                  <td className="p-3">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${account.email}`}
+                      checked={selectedIds.includes(account.id)}
+                      disabled={
+                        loading ||
+                        assignmentLocked ||
+                        account.state === 'offboarding' ||
+                        editingAccount !== null ||
+                        personalAccount !== null
+                      }
+                      onChange={(event) =>
+                        setSelectedIds((previous) =>
+                          event.target.checked
+                            ? [...previous, account.id]
+                            : previous.filter((id) => id !== account.id)
+                        )
+                      }
+                    />
+                  </td>
                   <td className="break-all p-3">{account.email}</td>
                   <td className="p-3">
                     {account.state === 'staged'
@@ -520,7 +618,12 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                         ? 'Offboarding'
                         : 'Active'}
                   </td>
-                  <td className="p-3">{account.groupId ? 'Assigned' : 'Unassigned'}</td>
+                  <td className="p-3">
+                    {account.groupId
+                      ? (groups.find((group) => group.id === account.groupId)?.name ??
+                        'Assigned (group not loaded)')
+                      : 'Unassigned'}
+                  </td>
                   <td className="p-3">
                     {account.membershipType === 'lifetime'
                       ? 'Lifetime — no expiry'
@@ -536,7 +639,11 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                       variant="outline"
                       size="sm"
                       disabled={
-                        loading || editingAccount !== null || account.state === 'offboarding'
+                        loading ||
+                        editingAccount !== null ||
+                        personalAccount !== null ||
+                        selectedIds.length > 0 ||
+                        account.state === 'offboarding'
                       }
                       aria-label={`Edit membership for ${account.email}`}
                       aria-controls="managed-membership-editor"
@@ -548,6 +655,26 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                       }}
                     >
                       Membership
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      disabled={
+                        loading ||
+                        editingAccount !== null ||
+                        personalAccount !== null ||
+                        selectedIds.length > 0 ||
+                        account.state === 'offboarding'
+                      }
+                      aria-label={`Edit personal addons for ${account.email}`}
+                      onClick={(event) => {
+                        returnFocus.current = event.currentTarget
+                        setPersonalAccount(account)
+                      }}
+                    >
+                      Personal addons
                     </Button>
                   </td>
                 </tr>
@@ -570,7 +697,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
         {nextCursor && (
           <Button
             variant="outline"
-            disabled={loading}
+            disabled={loading || assignmentLocked}
             onClick={() => {
               void loadInventory(nextCursor)
             }}

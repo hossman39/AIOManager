@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated 2026-09-19. These are foundation increments, not a deployable managed-groups release. No paying accounts, production database, or deployment has been accessed or modified. Backend work and its evidence are recorded in [BACKEND-FOUNDATION.md](BACKEND-FOUNDATION.md) and [MANAGED-STORAGE.md](MANAGED-STORAGE.md). Branch checkpoints/CI do not authorize production rollout.
+Updated 2026-09-20. These are foundation increments, not a deployable managed-groups release. No paying accounts, production database, or deployment has been accessed or modified. Backend work and its evidence are recorded in [BACKEND-FOUNDATION.md](BACKEND-FOUNDATION.md) and [MANAGED-STORAGE.md](MANAGED-STORAGE.md). Branch checkpoints/CI do not authorize production rollout.
 
 ## Completed locally
 
@@ -15,8 +15,10 @@ Updated 2026-09-19. These are foundation increments, not a deployable managed-gr
 - Added internal durable job claims, priority, pause checks, lease fencing/recovery, encrypted per-attempt snapshots, exact collection verification guards, and expiry/renewal supersession. This is persistence logic, not an enabled provider worker or expiry scheduler.
 - Added regression coverage for legacy sync claim races, read-side migration races, and preventing deletion/reclaim of a manager identity that owns managed data.
 - Added explicit dated/lifetime membership controls, shared New York cutoff resolution, additive migration 2, versioned retry-safe saves, and transactional renewal-job scheduling. Imported unset memberships remain distinct. Staged edits remain passive; no scheduler/provider writer is enabled. See [MEMBERSHIPS.md](MEMBERSHIPS.md).
-- Added encrypted group draft/personal-addon APIs and atomic bulk assignment with shared descriptor validation. Existing customization and configured URL case are retained; collisions require explicit resolution. No group publication, group UI or activation is enabled yet. See [GROUPS.md](GROUPS.md).
-- Added group publication persistence: expiring previews, immutable revisions, atomic cohort/job creation, retry-safe replay, and recorded deployment progress. The read-only manifest adapter, authenticated HTTP routes and typed client are connected; authoring UI and provider execution remain separate increments.
+- Added encrypted group draft/personal-addon APIs and atomic bulk assignment with shared descriptor validation. Existing customization and configured URL case are retained; collisions require explicit resolution. See [GROUPS.md](GROUPS.md).
+- Added group publication persistence: expiring previews, immutable revisions, atomic cohort/job creation, retry-safe replay, and recorded deployment progress. The read-only manifest adapter, authenticated HTTP routes and typed client are connected; provider execution remains disabled.
+- Added group authoring, preview/publish, passive bulk assignment and personal-addon editors. Metadata, catalogs, Cinemeta choices, exact URLs, enabled/protected flags and order remain editable. Retry freezes the original operation; stale edits require reload. A single navigation guard covers independent managed editors, pending imports/memberships, browser history and explicit logout. See [GROUP-EDITOR.md](GROUP-EDITOR.md).
+- Added owner-scoped discovery of the published group's recorded rollout, including encrypted restart recovery. UI selection/reload does not rely on a remembered publish response; missing published data fails closed.
 
 ## Current local evidence
 
@@ -38,10 +40,18 @@ Manifest/HTTP/client evidence and remaining integration work are in
 [GROUPS.md](GROUPS.md). A custom sync-server path mismatch in the managed client
 was also corrected and covered by a regression test.
 
-The manifest/HTTP/client increment passes 211 local tests (70 PostgreSQL cases
-reserved for hosted CI), typecheck, lint, build, and both production dependency
-audits. It adds no provider writer or activation endpoint. See
+The manifest/HTTP/client increment passed 211 local tests and all five hosted jobs,
+including 70 PostgreSQL cases, in [run 35487159436](https://github.com/hossman39/AIOManager/actions/runs/35487159436).
+Typecheck, lint, build and both production dependency audits passed. It adds no provider writer or activation endpoint. See
 [MANIFEST-VALIDATION.md](MANIFEST-VALIDATION.md) for the read-only boundaries.
+
+The authoring/navigation/recovered-progress increment passes 225 local tests,
+with 72 PostgreSQL cases reserved for hosted execution. Synthetic browser checks
+cover metadata/catalog retention, protected/disabled entries, bulk assignment,
+group/personal lost-response replay, stale edits, empty publication consent,
+reload, lifetime saves, navigation guarding and a 390px editor layout. No paying
+accounts or real addon/provider services are used. Hosted results are recorded
+separately once available.
 
 ## First-increment evidence (historical)
 
@@ -61,8 +71,8 @@ The first lockfile regeneration removed three stale packages absent from the exi
 
 1. Verify each new increment in hosted CI. Keep publishing manual/fork-owned; no image has been published. Dated/lifetime membership controls are implemented, not live expiry enforcement.
 2. Implement single-writer provider execution, bounded requests, retry policy/circuit breaker, and every existing writer's ownership/expiry gate. The tested internal job store is not sufficient by itself to activate clients.
-3. Finish membership/group configuration and activation from the tested passive migration screen. Verify the owner's actual export locally; never request client passwords in chat.
-4. Implement group draft/publish, first-sync safe mode, individual addons, and visible rollout status, preserving existing customization and new-account creation.
+3. Connect activation to the tested migration, membership and group screens. Verify the owner's actual export locally; never request client passwords in chat.
+4. Implement first-sync safe-mode execution and effective group/personal/Cinemeta projection, preserving existing customization, disabled preferences and deliberate new-account creation. The authoring screens record intent, not verified provider effects.
 5. Connect the tested membership policy to indexed expiry scanning, persisted suspension, an Expired view, and verified offboarding. No addon deletion is an expiry operation.
 6. Prove backup restoration, provider/Android contracts, concurrent changes, restart recovery, and 40/100-account load plus soak behavior before selecting a live pilot.
 

@@ -447,6 +447,16 @@ export function createManagedApi({
       }),
     deployment: (id: string, signal?: AbortSignal) =>
       request(`/deployments/${encodeURIComponent(id)}`, deploymentSchema, { signal }),
+    groupDeployment: async (id: string, signal?: AbortSignal) => {
+      const result = await request(
+        `/groups/${encodeURIComponent(id)}/deployment`,
+        z.object({ deployment: deploymentSchema.nullable() }),
+        { signal }
+      )
+      if (result.deployment && result.deployment.groupId !== id)
+        throw new ManagedApiError('INVALID_RESPONSE')
+      return result.deployment
+    },
     setMembership: (id: string, change: MembershipChange, key: string, signal?: AbortSignal) =>
       request(`/accounts/${encodeURIComponent(id)}/membership`, membershipResultSchema, {
         body: change,

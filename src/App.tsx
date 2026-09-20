@@ -76,7 +76,7 @@ function App() {
       const url = new URL(window.location.href)
       if (url.searchParams.get('id') !== auth.id) {
         url.searchParams.set('id', auth.id)
-        window.history.replaceState({}, '', url.toString())
+        window.history.replaceState(window.history.state, '', url.toString())
       }
     }
   }, [auth.isAuthenticated, auth.id, isInitialized])

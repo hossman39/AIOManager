@@ -60,12 +60,12 @@ export function SettingsPage() {
 
     const handleTabChange = (val: string) => {
         setActiveTab(val)
-        window.history.replaceState(null, '', `#${val}`)
+        window.history.replaceState(window.history.state, '', `#${val}`)
     }
 
     useEffect(() => {
         return () => {
-            window.history.replaceState(null, '', window.location.pathname)
+            window.history.replaceState(window.history.state, '', window.location.pathname)
         }
     }, [])
 

@@ -90,6 +90,9 @@ export async function registerManagedRoutes(app, repository, manifestService) {
       routes.get('/groups/:id', (request) =>
         repository.getGroup(request.managedAuth, request.params.id)
       )
+      routes.get('/groups/:id/deployment', (request) =>
+        repository.getGroupDeployment(request.managedAuth, request.params.id)
+      )
       routes.post('/groups', { bodyLimit: MAX_ADDON_CONFIG_BYTES + 4096 }, (request) =>
         repository.createGroup(
           request.managedAuth,

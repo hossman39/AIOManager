@@ -5,6 +5,7 @@ import { useSyncStore } from '@/store/syncStore'
 import { useFailoverStore } from '@/store/failoverStore'
 import { LogOut, LayoutDashboard, Package, Activity, BarChart3, Settings, HelpCircle, Zap, ZapOff, ShieldCheck, ExternalLink, UsersRound } from 'lucide-react'
 import { SyncStatus } from '@/components/SyncStatus'
+import { useGuardedLeave } from '@/components/common/UnsavedWorkGuard'
 import { useVaultStore } from '@/store/vaultStore'
 import { useProviderStore } from '@/store/providerStore'
 import { PROVIDERS } from '@/lib/constants'
@@ -19,6 +20,7 @@ export function Header() {
   const { theme } = useTheme()
   const isInverted = theme === 'light' || theme === 'hoth'
   const { auth, logout } = useSyncStore()
+  const guardedLeave = useGuardedLeave()
   const { rules, lastWorkerRun } = useFailoverStore()
 
   const { keys } = useVaultStore()
@@ -87,7 +89,7 @@ export function Header() {
                 type="button"
                 onClick={(e) => {
                   e.preventDefault();
-                  logout();
+                  guardedLeave(logout);
                 }}
                 className="md:hidden text-muted-foreground hover:text-destructive transition-colors p-2 rounded-md hover:bg-muted"
                 title="Logout"
@@ -232,7 +234,7 @@ export function Header() {
                 <div className="h-4 w-px bg-border mx-0.5" />
                 <button
                   type="button"
-                  onClick={(e) => { e.preventDefault(); logout(); }}
+                  onClick={(e) => { e.preventDefault(); guardedLeave(logout); }}
                   className="text-muted-foreground/50 hover:text-destructive transition-colors p-0.5"
                   title="Logout"
                 >

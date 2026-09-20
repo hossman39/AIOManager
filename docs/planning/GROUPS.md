@@ -147,5 +147,25 @@ Routes added under `/api/managed`: `POST /manifests/resolve`,
 `GET /deployments/:id`. Preview cancellation aborts its network read. A successful
 publication can be replayed after restart without fetching manifests again.
 
-Authoring UI, safe-mode projection against a fresh provider read, and every
-existing writer's gate remain required before enabling any account.
+This increment passed all five hosted jobs in
+[run 35487159436](https://github.com/hossman39/AIOManager/actions/runs/35487159436).
+
+## G3 authoring and recovered-progress increment
+
+The [group editor](GROUP-EDITOR.md) now supports draft authoring, explicit
+preview/publication, passive bulk assignment, personal addons and recorded rollout
+status. It preserves configured URLs and full descriptors with metadata/catalog,
+Cinemeta, enabled/protected and order controls. Exact retry and optimistic versions
+protect ambiguous saves and concurrent tabs. Navigation warnings include app links,
+browser history and logout, while leaving the existing route/auth tree intact.
+
+`GET /api/managed/groups/:id/deployment` discovers the deployment belonging to the
+published revision after reload. It returns explicit null only for an unpublished
+group, reuses the owner-scoped progress read, and treats missing published records
+as integrity errors. Selecting another group fences and hides older progress.
+No new schema, provider IO, activation or background timer is introduced.
+
+Local suite: 225 passed, zero failures, 72 PostgreSQL cases reserved for hosted CI.
+Browser evidence and limitations are recorded with the editor plan. Safe-mode
+projection against a fresh provider read and every existing writer's gate remain
+required before enabling any account.

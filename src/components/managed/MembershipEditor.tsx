@@ -7,6 +7,7 @@ import {
 } from '@/api/managed'
 import { newYorkExpiryChoices, resolveNewYorkExpiry } from '../../../shared/new-york-expiry.js'
 import { Button } from '@/components/ui/button'
+import { useUnsavedWarning } from '@/components/common/UnsavedWorkGuard'
 
 type Props = {
   account: ManagedAccount
@@ -34,6 +35,13 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
   const choices = useMemo(() => newYorkExpiryChoices(local), [local])
   const resolved = useMemo(() => resolveNewYorkExpiry(local, offset), [local, offset])
   const valid = mode === 'lifetime' || (mode === 'term' && resolved.ok)
+  useUnsavedWarning(
+    busy ||
+      uncertain ||
+      mode !== (account.membershipType === 'unset' ? '' : account.membershipType) ||
+      (mode === 'term' &&
+        (local !== (account.expiry?.local ?? '') || offset !== account.expiry?.offset))
+  )
 
   useEffect(() => {
     active.current = true

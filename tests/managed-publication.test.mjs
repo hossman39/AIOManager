@@ -66,6 +66,10 @@ test('file-backed publication retains its cohort and replays a committed request
   assert.equal(replay.replayed, true)
   assert.equal(replay.deploymentId, published.deploymentId)
   assert.equal(
+    (await repository.getGroupDeployment(firstAuth, storage.group.id)).deployment.id,
+    published.deploymentId
+  )
+  assert.equal(
     (await repository.getDeployment(firstAuth, published.deploymentId)).counts.pending,
     3
   )

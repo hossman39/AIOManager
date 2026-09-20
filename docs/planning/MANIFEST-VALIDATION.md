@@ -80,6 +80,11 @@ compatible indexing without changing the application's target. Both production
 dependency audits report zero known vulnerabilities. The added explicit ipaddr.js
 dependency changes no existing resolved package versions.
 
+The committed adapter/HTTP/client checkpoint passed Windows/Linux, PostgreSQL and
+AMD64/ARM64 container checks in
+[run 35487159436](https://github.com/hossman39/AIOManager/actions/runs/35487159436).
+This is not production deployment or real-provider evidence.
+
 ## Design references
 
 Connection pinning and redirect checks follow the threats described in the
