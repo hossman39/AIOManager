@@ -1,0 +1,500 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshCw, ShieldCheck, Upload, UsersRound } from 'lucide-react'
+import {
+  createManagedApi,
+  ManagedApiError,
+  type ManagedAccount,
+  type ManagedImportBatch,
+  type ManagedImportPreview,
+  type ManagedStatus,
+} from '@/api/managed'
+import { MAX_CREDENTIAL_IMPORT_BYTES } from '@/lib/managed/credential-import'
+import { prepareCredentialUpload, type CredentialUpload } from '@/lib/managed/prepare-import'
+import { useSyncStore } from '@/store/syncStore'
+import { Button } from '@/components/ui/button'
+
+type ManagedApi = ReturnType<typeof createManagedApi>
+const describeError = (error: unknown) =>
+  error instanceof ManagedApiError
+    ? error.message
+    : 'The operation could not be completed. Try again.'
+const isCancelled = (error: unknown) =>
+  error instanceof ManagedApiError && error.code === 'CANCELLED'
+
+export function ManagedAccountsPage() {
+  const auth = useSyncStore((state) => state.auth)
+  const serverUrl = useSyncStore((state) => state.serverUrl)
+  const api = useMemo(
+    () => createManagedApi({ managerId: auth.id, password: auth.password, serverUrl }),
+    [auth.id, auth.password, serverUrl]
+  )
+  return <ManagedWorkspace key={`${auth.id}:${serverUrl}`} api={api} />
+}
+
+function ManagedWorkspace({ api }: { api: ManagedApi }) {
+  const [accounts, setAccounts] = useState<ManagedAccount[]>([])
+  const [status, setStatus] = useState<ManagedStatus | null>(null)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [inventoryError, setInventoryError] = useState('')
+  const [search, setSearch] = useState('')
+  const [preview, setPreview] = useState<ManagedImportPreview | null>(null)
+  const [batch, setBatch] = useState<ManagedImportBatch | null>(null)
+  const [importError, setImportError] = useState('')
+  const [busy, setBusy] = useState<'preview' | 'stage' | null>(null)
+  const [consent, setConsent] = useState(false)
+  const [hasPending, setHasPending] = useState(false)
+  // Passwords stay in this transient ref, never in legacy stores/localStorage or
+  // public React view state. Clear references on success, cancel, and unmount.
+  const pending = useRef<{ upload: CredentialUpload; key: string } | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const inventoryAbort = useRef<AbortController | null>(null)
+  const importAbort = useRef<AbortController | null>(null)
+  const inventorySequence = useRef(0)
+  const importSequence = useRef(0)
+
+  const loadInventory = useCallback(
+    async (after = '') => {
+      const sequence = ++inventorySequence.current
+      inventoryAbort.current?.abort()
+      const controller = new AbortController()
+      inventoryAbort.current = controller
+      setLoading(true)
+      setInventoryError('')
+      try {
+        const [summary, page] = await Promise.all([
+          api.status(controller.signal),
+          api.accounts(after, controller.signal),
+        ])
+        if (sequence !== inventorySequence.current) return
+        setStatus(summary)
+        setAccounts((previous) =>
+          after
+            ? [
+                ...previous,
+                ...page.accounts.filter((row) => !previous.some((item) => item.id === row.id)),
+              ]
+            : page.accounts
+        )
+        setNextCursor(page.nextCursor)
+      } catch (error) {
+        if (sequence === inventorySequence.current && !isCancelled(error))
+          setInventoryError(describeError(error))
+      } finally {
+        if (sequence === inventorySequence.current) setLoading(false)
+      }
+    },
+    [api]
+  )
+
+  const discardRequests = useCallback(() => {
+    inventorySequence.current++
+    importSequence.current++
+    inventoryAbort.current?.abort()
+    importAbort.current?.abort()
+    pending.current = null
+  }, [])
+
+  useEffect(() => {
+    setPreview(null)
+    setBatch(null)
+    setConsent(false)
+    setHasPending(false)
+    setBusy(null)
+    setImportError('')
+    void loadInventory()
+    return discardRequests
+  }, [loadInventory, discardRequests])
+
+  const clearImport = () => {
+    importSequence.current++
+    importAbort.current?.abort()
+    pending.current = null
+    setHasPending(false)
+    setPreview(null)
+    setImportError('')
+    setConsent(false)
+    setBusy(null)
+    if (fileInput.current) fileInput.current.value = ''
+  }
+
+  const previewPending = async (sequence: number) => {
+    const record = pending.current
+    if (!record) return
+    const controller = new AbortController()
+    importAbort.current = controller
+    try {
+      const result = await api.previewImport(record.upload, controller.signal)
+      if (sequence === importSequence.current) setPreview(result)
+    } catch (error) {
+      if (sequence === importSequence.current && !isCancelled(error))
+        setImportError(describeError(error))
+    } finally {
+      if (sequence === importSequence.current) setBusy(null)
+    }
+  }
+
+  const selectFile = async (file: File | undefined) => {
+    if (!file) return
+    clearImport()
+    setBatch(null)
+    const sequence = importSequence.current
+    if (file.size > MAX_CREDENTIAL_IMPORT_BYTES) {
+      setImportError('The selected file exceeds the 10 MiB limit.')
+      return
+    }
+    setBusy('preview')
+    try {
+      const prepared = prepareCredentialUpload(await file.text())
+      if (sequence !== importSequence.current) return
+      if (!prepared.ok) {
+        setImportError(prepared.error.message)
+        setBusy(null)
+        return
+      }
+      pending.current = { upload: prepared.upload, key: crypto.randomUUID() }
+      setHasPending(true)
+      await previewPending(sequence)
+    } catch {
+      if (sequence === importSequence.current) {
+        setImportError('The file could not be read. Select a valid JSON export.')
+        setBusy(null)
+      }
+    }
+  }
+
+  const stage = async () => {
+    const record = pending.current
+    if (!record || !preview || !consent || busy) return
+    const sequence = ++importSequence.current
+    const controller = new AbortController()
+    importAbort.current = controller
+    setBusy('stage')
+    setImportError('')
+    try {
+      const result = await api.stageImport(record.upload, record.key, controller.signal)
+      if (sequence !== importSequence.current) return
+      pending.current = null
+      setHasPending(false)
+      setPreview(null)
+      setConsent(false)
+      setBatch(result)
+      void loadInventory()
+    } catch (error) {
+      if (sequence === importSequence.current && !isCancelled(error))
+        setImportError(describeError(error))
+      // Retain the same key and payload so an ambiguous response can be retried.
+    } finally {
+      if (sequence === importSequence.current) setBusy(null)
+    }
+  }
+
+  const shownAccounts = accounts.filter((account) =>
+    `${account.email} ${account.name}`.toLowerCase().includes(search.toLowerCase())
+  )
+  const readyCount = preview?.accounts.filter((account) => account.status === 'ready').length ?? 0
+  const existingCount =
+    preview?.accounts.filter((account) => account.status === 'existing').length ?? 0
+  const report = preview ?? batch
+
+  return (
+    <div className="space-y-6 pb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="flex items-center gap-2 text-2xl font-semibold">
+            <UsersRound aria-hidden="true" /> Managed users
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Prepare your existing clients for group-managed addons.
+          </p>
+        </div>
+        <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm">
+          <ShieldCheck className="h-4 w-4" aria-hidden="true" /> Staging only · provider writes
+          disabled
+        </span>
+      </div>
+      <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+        Development checkpoint: importing saves users on this server but does not sign in to Stremio
+        or change addons. Group activation and automatic expiry are not enabled in this build.
+        Existing accounts and addon features remain in their original tabs.
+      </p>
+
+      <section
+        className="space-y-4 rounded-xl border bg-card p-5"
+        aria-labelledby="managed-import-heading"
+      >
+        <div>
+          <h3 id="managed-import-heading" className="text-lg font-semibold">
+            1. Preview a credential-only import
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Export JSON from AIOManager Settings with saved credentials included. Only email and
+            password are uploaded; addons, tokens, names, dates, and automation rules are discarded.
+            Passwords are never shown here.
+          </p>
+        </div>
+        <label className="block space-y-2 text-sm font-medium" htmlFor="managed-import-file">
+          <span>AIOManager JSON export (up to 10 MiB)</span>
+          <input
+            id="managed-import-file"
+            ref={fileInput}
+            type="file"
+            accept=".json,application/json"
+            disabled={busy !== null}
+            className="block w-full rounded-md border p-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-muted file:px-3 file:py-1"
+            onChange={(event) => {
+              void selectFile(event.target.files?.[0])
+            }}
+          />
+        </label>
+        {busy === 'preview' && (
+          <p role="status" className="text-sm">
+            Checking rows and existing users… No users are being saved yet.
+          </p>
+        )}
+        {importError && (
+          <p
+            role="alert"
+            className="rounded border border-destructive/30 p-3 text-sm text-destructive"
+          >
+            {importError}
+          </p>
+        )}
+        {hasPending && !preview && !busy && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              setImportError('')
+              setBusy('preview')
+              void previewPending(++importSequence.current)
+            }}
+          >
+            Retry preview
+          </Button>
+        )}
+
+        {report && (
+          <div className="space-y-3">
+            <p className="text-sm">
+              {report.totalRows} source rows · {report.accounts.length} distinct credential
+              candidates
+            </p>
+            {preview && (
+              <p className="text-sm">
+                {readyCount} new users ready to stage · {existingCount} already saved ·{' '}
+                {preview.accounts.filter((account) => account.status === 'conflict').length}{' '}
+                saved-password conflicts
+              </p>
+            )}
+            <div className="max-h-72 overflow-auto rounded border">
+              <table className="w-full text-left text-sm">
+                <caption className="sr-only">Credential import reconciliation</caption>
+                <thead className="sticky top-0 bg-muted">
+                  <tr>
+                    <th scope="col" className="p-3">
+                      Source rows
+                    </th>
+                    <th scope="col" className="p-3">
+                      Email
+                    </th>
+                    <th scope="col" className="p-3">
+                      Result
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.accounts.map((account) => (
+                    <tr key={account.sourceRows.join(',')} className="border-t">
+                      <td className="p-3">{account.sourceRows.join(', ')}</td>
+                      <td className="break-all p-3">{account.email}</td>
+                      <td className="p-3">
+                        {
+                          {
+                            ready: 'Ready to stage',
+                            existing: 'Already saved',
+                            conflict: 'Password conflict — unchanged',
+                            staged: 'Saved, inactive',
+                          }[account.status]
+                        }
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {report.issues.length > 0 && (
+              <details className="rounded border p-3" open>
+                <summary className="cursor-pointer text-sm font-medium">
+                  {report.issues.length} row notices — no silent credential replacement
+                </summary>
+                <ul className="mt-2 max-h-48 space-y-1 overflow-auto text-sm text-muted-foreground">
+                  {report.issues.map((issue) => (
+                    <li key={`${issue.row}:${issue.code}`}>
+                      Row {issue.row}: {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+
+        {preview && (
+          <div className="space-y-3 border-t pt-4">
+            <h3 className="font-semibold">2. Save inactive users</h3>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={consent}
+                disabled={busy !== null}
+                onChange={(event) => setConsent(event.target.checked)}
+                className="mt-1"
+              />
+              <span>
+                I understand that account passwords will be stored encrypted on this server for
+                future unattended management. Use a trusted server over HTTPS. Importing does not
+                activate users.
+              </span>
+            </label>
+            <Button
+              onClick={() => {
+                void stage()
+              }}
+              disabled={!consent || readyCount + existingCount === 0 || busy !== null}
+            >
+              <Upload aria-hidden="true" />
+              {busy === 'stage' ? 'Saving inactive users…' : 'Save inactive users'}
+            </Button>
+          </div>
+        )}
+        {hasPending && (
+          <Button variant="ghost" disabled={busy === 'stage'} onClick={clearImport}>
+            Clear selected credentials
+          </Button>
+        )}
+        {batch && (
+          <p
+            role="status"
+            className="rounded border border-green-500/30 bg-green-500/5 p-3 text-sm"
+          >
+            {batch.replayed ? 'Import already saved. Original result: ' : 'Import saved: '}
+            {batch.created} users staged, {batch.existing} existing matches, {batch.conflicts}{' '}
+            saved-password conflicts.{' '}
+            {batch.issues.length > 0 && `See the ${batch.issues.length} row notices above. `}
+            No Stremio addons were changed.
+          </p>
+        )}
+      </section>
+
+      <section
+        className="space-y-4 rounded-xl border bg-card p-5"
+        aria-labelledby="managed-inventory-heading"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 id="managed-inventory-heading" className="text-lg font-semibold">
+              Saved user inventory
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {status
+                ? `${status.accounts.staged} staged · ${status.accounts.active} active · ${status.accounts.offboarding} offboarding`
+                : 'Reading server inventory…'}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            disabled={loading}
+            onClick={() => {
+              void loadInventory()
+            }}
+          >
+            <RefreshCw className={loading ? 'animate-spin' : ''} aria-hidden="true" />
+            Refresh
+          </Button>
+        </div>
+        {inventoryError && (
+          <p role="alert" className="text-sm text-destructive">
+            {inventoryError}
+          </p>
+        )}
+        <label htmlFor="managed-user-search" className="block text-sm">
+          Search loaded users
+        </label>
+        <input
+          id="managed-user-search"
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Email or display name"
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+        />
+        <div className="overflow-x-auto rounded border" aria-busy={loading}>
+          <table className="w-full text-left text-sm">
+            <caption className="sr-only">Users saved in managed storage</caption>
+            <thead className="bg-muted">
+              <tr>
+                <th scope="col" className="p-3">
+                  Email / display name
+                </th>
+                <th scope="col" className="p-3">
+                  Management
+                </th>
+                <th scope="col" className="p-3">
+                  Group
+                </th>
+                <th scope="col" className="p-3">
+                  Expiry (New York)
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {shownAccounts.map((account) => (
+                <tr key={account.id} className="border-t">
+                  <td className="break-all p-3">{account.email}</td>
+                  <td className="p-3">
+                    {account.state === 'staged'
+                      ? 'Staged — no changes'
+                      : account.state === 'offboarding'
+                        ? 'Offboarding'
+                        : 'Active'}
+                  </td>
+                  <td className="p-3">{account.groupId ? 'Assigned' : 'Unassigned'}</td>
+                  <td className="p-3">
+                    {account.expiry
+                      ? new Date(account.expiry.at).toLocaleString('en-US', {
+                          timeZone: 'America/New_York',
+                        })
+                      : 'Not set'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!loading && shownAccounts.length === 0 && (
+            <p className="p-4 text-sm text-muted-foreground">
+              {accounts.length
+                ? 'No loaded users match this search.'
+                : 'No managed users saved yet. Preview an export above to get started.'}
+            </p>
+          )}
+          {loading && accounts.length === 0 && (
+            <p role="status" className="p-4 text-sm">
+              Loading users…
+            </p>
+          )}
+        </div>
+        {nextCursor && (
+          <Button
+            variant="outline"
+            disabled={loading}
+            onClick={() => {
+              void loadInventory(nextCursor)
+            }}
+          >
+            Load more users
+          </Button>
+        )}
+      </section>
+    </div>
+  )
+}

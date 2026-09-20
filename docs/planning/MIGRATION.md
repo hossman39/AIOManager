@@ -64,6 +64,7 @@ Show a report with source/destination totals and status per category:
 | Password | Exact value captured and encrypted before staging, or explicit completion/conflict issue |
 | Source auth tokens, names, IDs, notes, colors, history | Ignored; runtime login creates a new session only when explicitly validating/activating |
 | Expiry | Unset on import; administrator selects exact New York date/time; never infer import date + one year |
+| Lifetime | Explicitly selectable after import; a missing source date never silently becomes lifetime membership |
 | New group assignment | Selected in bulk or individually; no group is inferred from old addons |
 | Safe-mode policy | New fork default enabled; legacy protected flags are not silently adopted |
 

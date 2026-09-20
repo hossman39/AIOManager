@@ -17,10 +17,11 @@ Updated 2026-09-19. These are foundation increments, not a deployable managed-gr
 
 ## Current local evidence
 
-113 tests pass; 27 real PostgreSQL cases are skipped locally and are assigned to
-the hosted PostgreSQL service. Typecheck, lint, and build pass. Both production
-dependency audits report zero known findings. The managed slice's hosted results
-are pending its branch checkpoint. Synthetic 100-account staging/inventory and
+The storage checkpoint passed all hosted checks in [run 35473935488](https://github.com/hossman39/AIOManager/actions/runs/35473935488),
+including its 27 PostgreSQL cases. The subsequent migration-screen increment adds
+seven client tests and an isolated synthetic browser rehearsal; see
+[MIGRATION-UI.md](MIGRATION-UI.md). Typecheck, lint, and build pass. Both production
+dependency audits report zero known findings. Synthetic 100-account staging/inventory and
 file-backed account/job/snapshot restart recovery pass; these are not provider
 throughput or real-device measurements.
 
@@ -40,9 +41,9 @@ The first lockfile regeneration removed three stale packages absent from the exi
 
 ## Next engineering work and release blockers
 
-1. Verify the new managed storage/job contracts in hosted PostgreSQL and container CI. Keep publishing manual/fork-owned; no image has been published.
+1. Verify each new increment in hosted CI. Keep publishing manual/fork-owned; no image has been published. Lifetime membership is now a confirmed addition to the membership controls.
 2. Implement single-writer provider execution, bounded requests, retry policy/circuit breaker, and every existing writer's ownership/expiry gate. The tested internal job store is not sufficient by itself to activate clients.
-3. Connect encrypted, idempotent staging to a preview/activation UI. Verify the owner's actual export locally; never request client passwords in chat.
+3. Finish membership/group configuration and activation from the tested passive migration screen. Verify the owner's actual export locally; never request client passwords in chat.
 4. Implement group draft/publish, first-sync safe mode, individual addons, and visible rollout status, preserving existing customization and new-account creation.
 5. Implement exact America/New_York expiry/renewal, persisted suspension, an Expired view, and verified offboarding. No addon deletion is an expiry operation.
 6. Prove backup restoration, provider/Android contracts, concurrent changes, restart recovery, and 40/100-account load plus soak behavior before selecting a live pilot.

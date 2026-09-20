@@ -89,12 +89,12 @@ preview, passive staging, and retained batch reports. Credentials never appear i
 these responses. Imports create no addon jobs and provider-write capability reports
 false. The internal job API has no HTTP route and no scheduler starts it.
 
-The full local suite passes 113 tests with 27 PostgreSQL cases skipped until the
-hosted service run. Identical storage/job contracts are registered for both engines.
+At this checkpoint the local suite passed 113 tests with 27 PostgreSQL cases assigned
+to the hosted service. Identical storage/job contracts are registered for both engines.
 Native SQLite file close/reopen covers persisted staging, idempotency, job recovery,
-and snapshots. Static checks/build and production dependency audits pass. Hosted
-results for this slice are pending; the previous backend increment already passed
-both container architectures and PostgreSQL.
+and snapshots. Static checks/build and production dependency audits passed. All
+Windows/Linux, PostgreSQL, AMD64, and ARM64 jobs passed for `01abed9` in
+[run 35473935488](https://github.com/hossman39/AIOManager/actions/runs/35473935488).
 
 Implementation follows PostgreSQL's [locking-clause contract](https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE)
 for `FOR UPDATE ... SKIP LOCKED`, and Node's [authenticated-encryption API](https://nodejs.org/api/crypto.html#ciphersetaadbuffer-options)

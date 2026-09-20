@@ -19,8 +19,9 @@ Recorded 2026-09-19 from the owner's numbered answers. These decisions supersede
 | Safe-mode scope | Global default with group overrides, plus the account's first-sync choices. Disabling safe mode allows the relevant destructive/reorder/edit operations. |
 | Safe-mode changes | Take effect on the next sync. No additional publication/confirmation workflow solely for a protection change. |
 | Expiry | Exact per-user date/time in `America/New_York`; disable every addon, overriding protection and including individual addons. Never delete saved addon records/configuration as an expiry action. |
+| Lifetime membership | Explicit per-user lifetime option, confirmed in the follow-up request. Lifetime users receive normal group/personal updates but have no automatic cutoff. Missing imported dates are not automatically lifetime memberships. |
 | Expired clients | Retain user credentials/configuration for renewal. Show an Expired system group/view and keep the former active group assignment for restoration. |
-| Renewal | Edit the user's expiry date/time. A future date lifts expiry suspension and syncs the current group plus individual/default/protected setup, respecting intentionally disabled entries. |
+| Renewal | Edit the user's expiry date/time or explicitly choose lifetime. Either a future date or lifetime lifts expiry suspension and syncs the current group plus individual/default/protected setup, respecting intentionally disabled entries. |
 | Removal | Clear remote addons and verify completion before deleting the local account record. Failed cleanup retains credentials and a visible pending/error record. |
 | Account creation | Preserve adding/creating new Stremio accounts. Migration is a separate import workflow and must not silently create replacements for failed logins. |
 | Testing | Dedicated test accounts/devices are available. Do not use paying accounts for fault/load tests. |

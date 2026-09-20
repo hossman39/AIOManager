@@ -33,6 +33,7 @@ V1 does not include billing/payment processing, customer login portals, Nuvio, n
 | Grace | None; no inferred extra entitlement | Implementation default |
 | Renewal | Set future expiry; restore current group plus individual configuration; retain account and prior group in Expired system view | Confirmed |
 | Missing expiry | No automatic cutoff; show that no expiry has been set | Proposed; never invent dates during migration |
+| Lifetime membership | Explicit option with no cutoff, distinct from an unset imported membership; group and personal-addon management continue normally | Confirmed follow-up |
 | Ungrouped accounts | Remain unmanaged/staged; no group write | Proposed |
 | Account removal | Verify removal of all remote addons before deleting the account record; failed cleanup remains visible and retryable | Confirmed |
 | Group deletion | Block deletion with members until reassignment or verified offboarding; never detach and leave paid addons active | Derived safeguard |
@@ -60,6 +61,14 @@ Assignment/reassignment is a versioned change followed by automatic reconciliati
 For managed accounts, individual addon operations edit the explicit personal-addon layer through the same queue. Preserve customization, catalogs, configured instances, and order; default personal addons after group entries. Duplicate exact URLs or conflicting edits require visible resolution. No hidden second writer may bypass policy.
 
 ### Expiry and renewal
+
+Membership controls offer dated or lifetime membership. Unconfigured imports remain
+visibly unset, never silently labeled lifetime. Lifetime is stored explicitly with
+no expiry fields, not a far-future sentinel date. Switching an expired managed user
+to lifetime is a renewal: retain the group and saved addon preferences, advance the
+policy version, and reconcile the latest configuration. Switching lifetime to a
+dated membership uses the selected New York cutoff, including immediate suspension
+if that cutoff is already past. Staged membership edits remain passive.
 
 Store the exact selected date/time, America/New_York timezone, and corresponding UTC cutoff. Do not round to end-of-day or invent an annual anniversary. Reject nonexistent spring-forward wall times; require explicit offset selection for repeated fall-back times. Preview the exact cutoff. Changing the server timezone must not rewrite stored cutoffs.
 
