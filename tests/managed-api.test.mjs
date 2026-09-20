@@ -8,6 +8,7 @@ import { buildServer } from '../server/app.js'
 import { DB } from '../server/db.js'
 import { encrypt, decrypt } from '../server/crypto.js'
 import { syntheticAccount, syntheticKey, firstAuth, secondAuth } from './managed-contract.mjs'
+import { configuredAddon } from './fixtures/addon-config.mjs'
 
 const headers = (auth = firstAuth) => ({
   'x-manager-id': auth.owner,
@@ -83,6 +84,10 @@ test('every managed API requires server-verified owner credentials', async (t) =
       { method: 'GET', url: '/api/managed/status' },
       importRequest(),
       { method: 'GET', url: '/api/managed/accounts' },
+      { method: 'GET', url: '/api/managed/groups' },
+      { method: 'POST', url: '/api/managed/groups', payload: { name: 'Synthetic' } },
+      { method: 'POST', url: '/api/managed/accounts/assign-group', payload: {} },
+      { method: 'GET', url: `/api/managed/accounts/${randomUUID()}/personal-addons` },
       {
         method: 'POST',
         url: `/api/managed/accounts/${randomUUID()}/membership`,
@@ -376,4 +381,74 @@ test('membership HTTP rejects hidden cutoffs, missing versions, DST gaps, and ov
       .record_version,
     1
   )
+})
+
+test('HTTP group drafts, personal addons and bulk staging assignments stay passive across restart', async (t) => {
+  const { app, db, start, networkCalls } = await fixture(t)
+  const id = (await app.inject(importRequest())).json().accounts[0].id
+  const post = (url, payload) => ({
+    method: 'POST',
+    url: `/api/managed${url}`,
+    headers: { ...headers(), 'idempotency-key': randomUUID() },
+    payload,
+  })
+  const request = post('/groups', { name: 'Test group', addons: [configuredAddon()] })
+  const created = await app.inject(request)
+  assert.equal(created.statusCode, 200, created.body)
+  const group = created.json().group
+  assert.equal((await app.inject(request)).json().replayed, true)
+  const assigned = await app.inject(
+    post('/accounts/assign-group', { groupId: group.id, accounts: [{ id, expectedVersion: 1 }] })
+  )
+  assert.equal(assigned.statusCode, 200, assigned.body)
+  assert.equal(assigned.json().accounts[0].account.state, 'staged')
+  const personalRequest = post(`/accounts/${id}/personal-addons`, {
+    expectedVersion: 2,
+    addons: [configuredAddon('Personal')],
+  })
+  const personal = await app.inject(personalRequest)
+  assert.equal(personal.statusCode, 200, personal.body)
+  assert.equal(personal.json().jobId, null)
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+  const denied = await app.inject({
+    ...personalRequest,
+    headers: { ...headers(secondAuth), 'idempotency-key': randomUUID() },
+  })
+  assert.equal(denied.statusCode, 404)
+  assert.ok(!denied.body.includes('Personal'))
+  await app.close()
+  const next = await start()
+  const savedGroup = await next.app.inject({
+    url: `/api/managed/groups/${group.id}`,
+    headers: headers(),
+  })
+  assert.deepEqual(savedGroup.json().draft, [configuredAddon()])
+  const savedPersonal = await next.app.inject({
+    url: `/api/managed/accounts/${id}/personal-addons`,
+    headers: headers(),
+  })
+  assert.deepEqual(savedPersonal.json().addons, [configuredAddon('Personal')])
+  assert.equal(savedPersonal.json().account.groupId, group.id)
+  assert.equal(savedPersonal.json().account.state, 'staged')
+  assert.equal(networkCalls(), 0)
+})
+
+test('HTTP group validation cannot turn malformed addon configuration into an empty draft', async (t) => {
+  const { app, db } = await fixture(t)
+  for (const addons of [
+    null,
+    [{ transportUrl: 'SENSITIVE-broken-url' }],
+    [configuredAddon(), configuredAddon()],
+  ]) {
+    const result = await app.inject({
+      method: 'POST',
+      url: '/api/managed/groups',
+      headers: { ...headers(), 'idempotency-key': randomUUID() },
+      payload: { name: 'Synthetic', addons },
+    })
+    assert.equal(result.statusCode, 422, result.body)
+    assert.ok(!result.body.includes('SENSITIVE'))
+    assert.ok(!result.body.includes('GroupToken'))
+  }
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_groups')).count, 0)
 })

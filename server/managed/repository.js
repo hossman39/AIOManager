@@ -6,6 +6,7 @@ import { authenticateManager } from './auth.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { createManagedJobStore, currentAccountTarget } from './jobs.js'
+import { createManagedGroupRepository } from './groups.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
@@ -138,6 +139,15 @@ export function createManagedRepository({ db, crypto, legacyKeys, now = Date.now
   }
 
   return Object.freeze({
+    ...createManagedGroupRepository({
+      db,
+      crypto,
+      authorize,
+      ownerTransaction,
+      idempotent,
+      publicAccount,
+      jobs,
+    }),
     authorize,
     async setMembership(auth, id, input, requestKey) {
       const parsed = membershipSchema.safeParse(input)

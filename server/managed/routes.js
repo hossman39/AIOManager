@@ -1,4 +1,5 @@
 import { MAX_CREDENTIAL_IMPORT_BYTES } from '../../shared/credential-import.js'
+import { MAX_ADDON_CONFIG_BYTES } from '../../shared/addon-config.js'
 import { ManagedError } from './errors.js'
 import { parseImportBody } from './repository.js'
 
@@ -53,6 +54,51 @@ export async function registerManagedRoutes(app, repository) {
         })
       })
       routes.get('/status', (request) => repository.status(request.managedAuth))
+      routes.get('/groups', (request) =>
+        repository.listGroups(request.managedAuth, {
+          ...(request.query.limit === undefined ? {} : { limit: Number(request.query.limit) }),
+          ...(request.query.after === undefined ? {} : { after: request.query.after }),
+        })
+      )
+      routes.get('/groups/:id', (request) =>
+        repository.getGroup(request.managedAuth, request.params.id)
+      )
+      routes.post('/groups', { bodyLimit: MAX_ADDON_CONFIG_BYTES + 4096 }, (request) =>
+        repository.createGroup(
+          request.managedAuth,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/groups/:id/draft', { bodyLimit: MAX_ADDON_CONFIG_BYTES + 4096 }, (request) =>
+        repository.saveGroupDraft(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/accounts/assign-group', { bodyLimit: 64 * 1024 }, (request) =>
+        repository.assignGroup(
+          request.managedAuth,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.get('/accounts/:id/personal-addons', (request) =>
+        repository.getPersonalAddons(request.managedAuth, request.params.id)
+      )
+      routes.post(
+        '/accounts/:id/personal-addons',
+        { bodyLimit: MAX_ADDON_CONFIG_BYTES + 4096 },
+        (request) =>
+          repository.setPersonalAddons(
+            request.managedAuth,
+            request.params.id,
+            request.body,
+            request.headers['idempotency-key']
+          )
+      )
       routes.get('/accounts', (request) =>
         repository.listAccounts(request.managedAuth, {
           ...(request.query.limit === undefined ? {} : { limit: Number(request.query.limit) }),

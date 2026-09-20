@@ -15,18 +15,24 @@ Updated 2026-09-19. These are foundation increments, not a deployable managed-gr
 - Added internal durable job claims, priority, pause checks, lease fencing/recovery, encrypted per-attempt snapshots, exact collection verification guards, and expiry/renewal supersession. This is persistence logic, not an enabled provider worker or expiry scheduler.
 - Added regression coverage for legacy sync claim races, read-side migration races, and preventing deletion/reclaim of a manager identity that owns managed data.
 - Added explicit dated/lifetime membership controls, shared New York cutoff resolution, additive migration 2, versioned retry-safe saves, and transactional renewal-job scheduling. Imported unset memberships remain distinct. Staged edits remain passive; no scheduler/provider writer is enabled. See [MEMBERSHIPS.md](MEMBERSHIPS.md).
+- Added encrypted group draft/personal-addon APIs and atomic bulk assignment with shared descriptor validation. Existing customization and configured URL case are retained; collisions require explicit resolution. No group publication, group UI or activation is enabled yet. See [GROUPS.md](GROUPS.md).
 
 ## Current local evidence
 
-The migration-screen checkpoint passed all hosted checks in [run 35482177523](https://github.com/hossman39/AIOManager/actions/runs/35482177523),
-including its 27 PostgreSQL cases. The membership increment passes 139 local tests
-with 37 PostgreSQL cases awaiting hosted execution. Isolated synthetic browser
+The membership checkpoint passed all hosted checks in [run 35484284157](https://github.com/hossman39/AIOManager/actions/runs/35484284157),
+including its 37 PostgreSQL cases. The same increment passed 139 local tests
+with those PostgreSQL cases assigned to hosted execution. Isolated synthetic browser
 rehearsals cover credential staging, lifetime/date saves, lost-response retry,
 reload, and mobile layout; see [MIGRATION-UI.md](MIGRATION-UI.md) and
 [MEMBERSHIPS.md](MEMBERSHIPS.md). Typecheck, lint, and build pass. Both production
 dependency audits report zero known findings. Synthetic 100-account staging/inventory and
 file-backed account/job/snapshot restart recovery pass; these are not provider
 throughput or real-device measurements.
+
+The next G1 group-storage increment passes 160 local tests, with 50 PostgreSQL
+cases assigned to hosted CI. Its evidence and remaining publication work are in
+[GROUPS.md](GROUPS.md). A custom sync-server path mismatch in the managed client
+was also corrected and covered by a regression test.
 
 ## First-increment evidence (historical)
 
