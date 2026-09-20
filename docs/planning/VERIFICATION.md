@@ -93,6 +93,7 @@ Resolve baseline lint failures. Triage dependency findings for actual runtime re
 - [ ] Every existing writer is integrated or explicitly disabled for activated clients.
 - [ ] Policy/expiry races, timeout-after-acceptance, and restart recovery pass fault tests.
 - [ ] No account/addon/history deletion is part of expiry; disabled records survive sync/restart and manual disable preferences survive renewal.
+- [ ] Explicit lifetime has no cutoff, remains group-managed, survives upgrade/restart, and renews expired users without altering saved preferences; unset imports are not silently lifetime.
 - [ ] Performance and soak evidence meet agreed budgets or documented revised targets.
 - [ ] DB and encryption-key restore has succeeded in an isolated instance with writes off.
 - [ ] Individual/group recovery and application/schema rollback have been rehearsed.

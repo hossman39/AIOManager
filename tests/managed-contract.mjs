@@ -16,7 +16,7 @@ export const syntheticAccount = {
 export const parsedAccounts = (accounts = [syntheticAccount]) =>
   parseImportBody({ version: '2.0.0', accounts })
 
-export async function prepareManagedFixture(db) {
+export async function prepareManagedFixture(db, { migrations = managedMigrations } = {}) {
   await db.exec(
     'CREATE TABLE kv_store (key TEXT PRIMARY KEY, value TEXT, password TEXT, updated_at BIGINT)'
   )
@@ -26,7 +26,7 @@ export async function prepareManagedFixture(db) {
       encrypt(auth.token, syntheticKey),
     ])
   }
-  await migrateManagedSchema(db)
+  await migrateManagedSchema(db, migrations)
   const crypto = await initializeManagedCrypto(db, { primary: syntheticKey })
   let timestamp = 1_790_000_000_000
   const now = () => timestamp
@@ -53,7 +53,7 @@ export function managedStorageContract(prefix, options, fixture) {
       await migrateManagedSchema(db)
       assert.equal(
         (await db.get('SELECT COUNT(*) AS count FROM managed_schema_migrations')).count,
-        1
+        managedMigrations.length
       )
       await db.run('UPDATE managed_schema_migrations SET checksum = $1 WHERE version = 1', [
         'tampered',
@@ -65,15 +65,19 @@ export function managedStorageContract(prefix, options, fixture) {
     const migrations = [
       ...managedMigrations,
       {
-        version: 2,
+        version: managedMigrations.length + 1,
         name: 'synthetic-failure',
         sql: 'CREATE TABLE synthetic_rolled_back (id TEXT); INSERT INTO missing_synthetic_table VALUES (1);',
       },
     ]
     await assert.rejects(migrateManagedSchema(db, migrations))
-    assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_schema_migrations')).count, 1)
+    assert.equal(
+      (await db.get('SELECT COUNT(*) AS count FROM managed_schema_migrations')).count,
+      managedMigrations.length
+    )
     await assert.rejects(db.get('SELECT * FROM synthetic_rolled_back'))
-    await db.run('INSERT INTO managed_schema_migrations VALUES (2, $1, $2, 0)', [
+    await db.run('INSERT INTO managed_schema_migrations VALUES ($1, $2, $3, 0)', [
+      managedMigrations.length + 1,
       'future',
       'unknown',
     ])

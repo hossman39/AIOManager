@@ -14,13 +14,16 @@ Updated 2026-09-19. These are foundation increments, not a deployable managed-gr
 - Added versioned managed schema migrations, strict owner/record-bound encrypted envelopes, a stable wrapped lookup key, authenticated staging APIs, encrypted import reports, and atomic request/batch deduplication. Preview and staging perform no provider calls and create no runnable jobs.
 - Added internal durable job claims, priority, pause checks, lease fencing/recovery, encrypted per-attempt snapshots, exact collection verification guards, and expiry/renewal supersession. This is persistence logic, not an enabled provider worker or expiry scheduler.
 - Added regression coverage for legacy sync claim races, read-side migration races, and preventing deletion/reclaim of a manager identity that owns managed data.
+- Added explicit dated/lifetime membership controls, shared New York cutoff resolution, additive migration 2, versioned retry-safe saves, and transactional renewal-job scheduling. Imported unset memberships remain distinct. Staged edits remain passive; no scheduler/provider writer is enabled. See [MEMBERSHIPS.md](MEMBERSHIPS.md).
 
 ## Current local evidence
 
-The storage checkpoint passed all hosted checks in [run 35473935488](https://github.com/hossman39/AIOManager/actions/runs/35473935488),
-including its 27 PostgreSQL cases. The subsequent migration-screen increment adds
-seven client tests and an isolated synthetic browser rehearsal; see
-[MIGRATION-UI.md](MIGRATION-UI.md). Typecheck, lint, and build pass. Both production
+The migration-screen checkpoint passed all hosted checks in [run 35482177523](https://github.com/hossman39/AIOManager/actions/runs/35482177523),
+including its 27 PostgreSQL cases. The membership increment passes 139 local tests
+with 37 PostgreSQL cases awaiting hosted execution. Isolated synthetic browser
+rehearsals cover credential staging, lifetime/date saves, lost-response retry,
+reload, and mobile layout; see [MIGRATION-UI.md](MIGRATION-UI.md) and
+[MEMBERSHIPS.md](MEMBERSHIPS.md). Typecheck, lint, and build pass. Both production
 dependency audits report zero known findings. Synthetic 100-account staging/inventory and
 file-backed account/job/snapshot restart recovery pass; these are not provider
 throughput or real-device measurements.
@@ -41,11 +44,11 @@ The first lockfile regeneration removed three stale packages absent from the exi
 
 ## Next engineering work and release blockers
 
-1. Verify each new increment in hosted CI. Keep publishing manual/fork-owned; no image has been published. Lifetime membership is now a confirmed addition to the membership controls.
+1. Verify each new increment in hosted CI. Keep publishing manual/fork-owned; no image has been published. Dated/lifetime membership controls are implemented, not live expiry enforcement.
 2. Implement single-writer provider execution, bounded requests, retry policy/circuit breaker, and every existing writer's ownership/expiry gate. The tested internal job store is not sufficient by itself to activate clients.
 3. Finish membership/group configuration and activation from the tested passive migration screen. Verify the owner's actual export locally; never request client passwords in chat.
 4. Implement group draft/publish, first-sync safe mode, individual addons, and visible rollout status, preserving existing customization and new-account creation.
-5. Implement exact America/New_York expiry/renewal, persisted suspension, an Expired view, and verified offboarding. No addon deletion is an expiry operation.
+5. Connect the tested membership policy to indexed expiry scanning, persisted suspension, an Expired view, and verified offboarding. No addon deletion is an expiry operation.
 6. Prove backup restoration, provider/Android contracts, concurrent changes, restart recovery, and 40/100-account load plus soak behavior before selecting a live pilot.
 
 The [verification plan](VERIFICATION.md) remains the release authority. These unit tests do not establish zero bugs, complete migration, durable expiry, or real-device behavior.

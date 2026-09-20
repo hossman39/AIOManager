@@ -33,6 +33,10 @@ export function currentAccountTarget(account, timestamp) {
   if (account.state === 'staged') return null
   if (account.state === 'offboarding') return 'offboard'
   if (account.state !== 'active') throw new ManagedError('INVALID_STATE')
+  if (account.lifetime === 1) {
+    if (account.expiry_at !== null) throw new ManagedError('INVALID_STATE')
+    return 'active'
+  }
   return account.expiry_at !== null && account.expiry_at <= timestamp ? 'suspended' : 'active'
 }
 

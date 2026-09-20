@@ -12,6 +12,7 @@ import { MAX_CREDENTIAL_IMPORT_BYTES } from '@/lib/managed/credential-import'
 import { prepareCredentialUpload, type CredentialUpload } from '@/lib/managed/prepare-import'
 import { useSyncStore } from '@/store/syncStore'
 import { Button } from '@/components/ui/button'
+import { MembershipEditor } from '@/components/managed/MembershipEditor'
 
 type ManagedApi = ReturnType<typeof createManagedApi>
 const describeError = (error: unknown) =>
@@ -44,6 +45,11 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   const [busy, setBusy] = useState<'preview' | 'stage' | null>(null)
   const [consent, setConsent] = useState(false)
   const [hasPending, setHasPending] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<ManagedAccount | null>(null)
+  const [editorRevision, setEditorRevision] = useState(0)
+  const [membershipNotice, setMembershipNotice] = useState('')
+  const returnFocus = useRef<HTMLButtonElement | null>(null)
+  const restoreFocus = useRef(false)
   // Passwords stay in this transient ref, never in legacy stores/localStorage or
   // public React view state. Clear references on success, cancel, and unmount.
   const pending = useRef<{ upload: CredentialUpload; key: string } | null>(null)
@@ -68,14 +74,20 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
         ])
         if (sequence !== inventorySequence.current) return
         setStatus(summary)
-        setAccounts((previous) =>
-          after
+        setAccounts((previous) => {
+          // An inventory request started before a save must not replace a newer
+          // membership already acknowledged in this browser.
+          const refreshed = page.accounts.map((row) => {
+            const saved = previous.find((item) => item.id === row.id)
+            return saved && saved.version > row.version ? saved : row
+          })
+          return after
             ? [
                 ...previous,
-                ...page.accounts.filter((row) => !previous.some((item) => item.id === row.id)),
+                ...refreshed.filter((row) => !previous.some((item) => item.id === row.id)),
               ]
-            : page.accounts
-        )
+            : refreshed
+        })
         setNextCursor(page.nextCursor)
       } catch (error) {
         if (sequence === inventorySequence.current && !isCancelled(error))
@@ -96,6 +108,8 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   }, [])
 
   useEffect(() => {
+    setEditingAccount(null)
+    setMembershipNotice('')
     setPreview(null)
     setBatch(null)
     setConsent(false)
@@ -105,6 +119,21 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
     void loadInventory()
     return discardRequests
   }, [loadInventory, discardRequests])
+
+  useEffect(() => {
+    if (!editingAccount && !loading && restoreFocus.current) {
+      returnFocus.current?.focus()
+      restoreFocus.current = false
+    }
+  }, [editingAccount, loading])
+
+  const replaceAccount = (updated: ManagedAccount) => {
+    setAccounts((previous) =>
+      previous.map((row) =>
+        row.id === updated.id && row.version <= updated.version ? updated : row
+      )
+    )
+  }
 
   const clearImport = () => {
     importSequence.current++
@@ -428,6 +457,36 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
           placeholder="Email or display name"
           className="w-full rounded-md border bg-background px-3 py-2 text-sm"
         />
+        {membershipNotice && (
+          <p role="status" className="text-sm">
+            {membershipNotice}
+          </p>
+        )}
+        {editingAccount && (
+          <MembershipEditor
+            key={`${editingAccount.id}:${editorRevision}`}
+            account={editingAccount}
+            api={api}
+            onClose={() => {
+              restoreFocus.current = true
+              setEditingAccount(null)
+            }}
+            onSaved={(updated) => {
+              replaceAccount(updated)
+              restoreFocus.current = true
+              setEditingAccount(null)
+              setMembershipNotice(
+                `Membership saved for ${updated.email}. ${updated.state === 'staged' ? 'This user is still staged; no Stremio addons were changed.' : 'Provider sync status is tracked separately.'}`
+              )
+              void loadInventory()
+            }}
+            onReloaded={(updated) => {
+              replaceAccount(updated)
+              setEditingAccount(updated)
+              setEditorRevision((revision) => revision + 1)
+            }}
+          />
+        )}
         <div className="overflow-x-auto rounded border" aria-busy={loading}>
           <table className="w-full text-left text-sm">
             <caption className="sr-only">Users saved in managed storage</caption>
@@ -443,7 +502,10 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                   Group
                 </th>
                 <th scope="col" className="p-3">
-                  Expiry (New York)
+                  Membership / expiry (New York)
+                </th>
+                <th scope="col" className="p-3">
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -460,11 +522,33 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                   </td>
                   <td className="p-3">{account.groupId ? 'Assigned' : 'Unassigned'}</td>
                   <td className="p-3">
-                    {account.expiry
-                      ? new Date(account.expiry.at).toLocaleString('en-US', {
-                          timeZone: 'America/New_York',
-                        })
-                      : 'Not set'}
+                    {account.membershipType === 'lifetime'
+                      ? 'Lifetime — no expiry'
+                      : account.expiry
+                        ? new Date(account.expiry.at).toLocaleString('en-US', {
+                            timeZone: 'America/New_York',
+                            timeZoneName: 'short',
+                          })
+                        : 'Not set'}
+                  </td>
+                  <td className="p-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        loading || editingAccount !== null || account.state === 'offboarding'
+                      }
+                      aria-label={`Edit membership for ${account.email}`}
+                      aria-controls="managed-membership-editor"
+                      onClick={(event) => {
+                        returnFocus.current = event.currentTarget
+                        setMembershipNotice('')
+                        setEditingAccount(account)
+                        setEditorRevision((revision) => revision + 1)
+                      }}
+                    >
+                      Membership
+                    </Button>
                   </td>
                 </tr>
               ))}

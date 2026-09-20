@@ -5,6 +5,7 @@ import pg from 'pg'
 import { DB } from '../server/db.js'
 import { managedStorageContract, prepareManagedFixture } from './managed-contract.mjs'
 import { managedJobContract } from './managed-job-contract.mjs'
+import { managedMembershipContract } from './managed-membership-contract.mjs'
 
 const connectionString = process.env.AIO_TEST_POSTGRES_URL
 const options = { skip: !connectionString }
@@ -43,6 +44,9 @@ managedStorageContract('PostgreSQL managed storage', options, async (t) =>
 )
 managedJobContract('PostgreSQL durable jobs', options, async (t) =>
   prepareManagedFixture(await fixture(t))
+)
+managedMembershipContract('PostgreSQL membership', options, async (t, fixtureOptions) =>
+  prepareManagedFixture(await fixture(t), fixtureOptions)
 )
 
 test('real PostgreSQL commits and rolls back on its checked-out connection', options, async (t) => {

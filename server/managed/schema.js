@@ -159,6 +159,12 @@ CREATE TABLE managed_audit (
 CREATE INDEX managed_audit_owner ON managed_audit (owner_id, created_at DESC);
 `,
   }),
+  Object.freeze({
+    version: 2,
+    name: 'explicit-lifetime-membership',
+    sql: `ALTER TABLE managed_accounts ADD COLUMN lifetime INTEGER NOT NULL DEFAULT 0
+      CHECK (lifetime IN (0, 1) AND (lifetime = 0 OR expiry_at IS NULL));`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

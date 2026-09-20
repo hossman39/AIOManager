@@ -170,3 +170,80 @@ test('a cancelled in-flight request is not automatically retried or logged', asy
   await assert.rejects(api.status(controller.signal), { code: 'CANCELLED' })
   assert.equal(calls, 1)
 })
+
+const publicAccount = {
+  id: 'dcc6dd72-eaac-4b5a-aa25-ddba5a6866ce',
+  email: 'person@example.invalid',
+  name: 'person@example.invalid',
+  state: 'staged',
+  groupId: null,
+  membershipType: 'lifetime',
+  version: 2,
+  policyVersion: 2,
+  expiry: null,
+  safeMode: null,
+  appliedVersion: null,
+  appliedTarget: null,
+  verifiedAt: null,
+  createdAt: 1_790_000_000_000,
+  updatedAt: 1_790_000_000_100,
+}
+
+test('membership client preserves the exact retry key and selected New York occurrence', async () => {
+  const change = {
+    mode: 'term' as const,
+    expectedVersion: 2,
+    local: '2026-11-01T01:30',
+    offset: -300,
+  }
+  const key = 'synthetic-membership-retry-key'
+  let calls = 0
+  const api = createManagedApi({
+    ...auth,
+    fetch: async (url, options) => {
+      calls++
+      assert.equal(url, `/api/managed/accounts/${publicAccount.id}/membership`)
+      assert.equal(options?.method, 'POST')
+      assert.equal(new Headers(options?.headers).get('idempotency-key'), key)
+      assert.deepEqual(JSON.parse(String(options?.body)), change)
+      if (calls === 1) throw new Error('synthetic lost response')
+      return reply({
+        account: {
+          ...publicAccount,
+          membershipType: 'term',
+          expiry: {
+            at: Date.parse('2026-11-01T06:30:00Z'),
+            local: change.local,
+            offset: -300,
+            timezone: 'America/New_York',
+          },
+          password: 'private-secret',
+        },
+        jobId: null,
+        replayed: true,
+      })
+    },
+  })
+  await assert.rejects(api.setMembership(publicAccount.id, change, key), { code: 'NETWORK_ERROR' })
+  assert.equal(calls, 1)
+  const result = await api.setMembership(publicAccount.id, change, key)
+  assert.equal(result.account.membershipType, 'term')
+  assert.equal(result.account.expiry?.offset, -300)
+  assert.equal(result.replayed, true)
+  assert.ok(!JSON.stringify(result).includes('private-secret'))
+})
+
+test('membership client rejects contradictory lifetime/date responses', async () => {
+  for (const account of [
+    { ...publicAccount, membershipType: 'term', expiry: null },
+    {
+      ...publicAccount,
+      membershipType: 'lifetime',
+      expiry: { at: 0, local: '1970-01-01T00:00', offset: -300, timezone: 'America/New_York' },
+    },
+    { ...publicAccount, membershipType: 'unknown' },
+  ]) {
+    const api = createManagedApi({ ...auth, fetch: async () => reply(account) })
+    await assert.rejects(api.account(publicAccount.id), { code: 'INVALID_RESPONSE' })
+  }
+})

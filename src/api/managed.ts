@@ -37,32 +37,40 @@ const batchSchema = previewSchema.extend({
   conflicts: z.number().int().nonnegative(),
   replayed: z.boolean(),
 })
-const accountSchema = z.object({
-  id: z.uuid(),
-  email: z.email(),
-  name: z.string(),
-  state: z.enum(['staged', 'active', 'offboarding']),
-  groupId: z.string().nullable(),
-  version: z.number().int().positive(),
-  policyVersion: z.number().int().positive(),
-  expiry: z
-    .object({
-      at: z.number().int(),
-      local: z.string(),
-      offset: z.number().int(),
-      timezone: z.literal('America/New_York'),
-    })
-    .nullable(),
-  safeMode: z.boolean().nullable(),
-  appliedVersion: z.number().int().nullable(),
-  appliedTarget: z.enum(['active', 'suspended', 'offboard']).nullable(),
-  verifiedAt: z.number().int().nullable(),
-  createdAt: z.number().int(),
-  updatedAt: z.number().int(),
-})
+const accountSchema = z
+  .object({
+    id: z.uuid(),
+    email: z.email(),
+    name: z.string(),
+    state: z.enum(['staged', 'active', 'offboarding']),
+    groupId: z.string().nullable(),
+    membershipType: z.enum(['unset', 'term', 'lifetime']),
+    version: z.number().int().positive(),
+    policyVersion: z.number().int().positive(),
+    expiry: z
+      .object({
+        at: z.number().int(),
+        local: z.string(),
+        offset: z.number().int(),
+        timezone: z.literal('America/New_York'),
+      })
+      .nullable(),
+    safeMode: z.boolean().nullable(),
+    appliedVersion: z.number().int().nullable(),
+    appliedTarget: z.enum(['active', 'suspended', 'offboard']).nullable(),
+    verifiedAt: z.number().int().nullable(),
+    createdAt: z.number().int(),
+    updatedAt: z.number().int(),
+  })
+  .refine((account) => (account.membershipType === 'term') === (account.expiry !== null))
 const accountsSchema = z.object({
   accounts: z.array(accountSchema),
   nextCursor: z.uuid().nullable(),
+})
+const membershipResultSchema = z.object({
+  account: accountSchema,
+  jobId: z.uuid().nullable(),
+  replayed: z.boolean(),
 })
 const statusSchema = z.object({
   capabilities: z.object({ passiveImport: z.boolean(), providerWrites: z.boolean() }),
@@ -81,25 +89,35 @@ export type ManagedImportPreview = z.infer<typeof previewSchema>
 export type ManagedImportBatch = z.infer<typeof batchSchema>
 export type ManagedAccount = z.infer<typeof accountSchema>
 export type ManagedStatus = z.infer<typeof statusSchema>
+export type MembershipChange =
+  | { mode: 'lifetime'; expectedVersion: number }
+  | { mode: 'term'; expectedVersion: number; local: string; offset?: number }
 
 const errorMessages = {
   UNAUTHORIZED: 'Your manager session could not be verified. Sign in again.',
   NOT_FOUND: 'This managed record was not found.',
   INVALID_INPUT: 'The request could not be accepted. Check the selected file or values.',
   IDEMPOTENCY_KEY_REQUIRED:
-    'The import request is missing its retry identifier. Select the file again.',
+    'The request is missing its retry identifier. Reload before trying again.',
   IDEMPOTENCY_CONFLICT:
-    'This retry identifier was used for a different import. Select the file again.',
+    'This retry identifier was used for a different change. Reload the saved values.',
   VERSION_CONFLICT: 'The record changed. Refresh it before trying again.',
+  INVALID_STATE: 'This account cannot be changed in its current management state.',
+  INVALID_EXPIRY: 'Choose a valid New York date and time.',
+  NONEXISTENT_EXPIRY:
+    'That New York time does not exist because the clocks move forward. Choose another time.',
+  AMBIGUOUS_EXPIRY:
+    'That New York time occurs twice. Choose the daylight or standard time occurrence.',
   DATA_UNREADABLE: 'The server cannot decrypt managed data. Restore its matching encryption key.',
   FILE_TOO_LARGE: 'The import file exceeds 10 MiB.',
+  REQUEST_TOO_LARGE: 'The request exceeds the size limit for this operation.',
   UNSUPPORTED_VERSION: 'This export version is not supported.',
   UNSUPPORTED_FORMAT: 'Select an AIOManager Settings export or account list.',
   TOO_MANY_ACCOUNTS: 'The export exceeds 10,000 account rows.',
   INVALID_RESPONSE:
     'The server returned an unexpected response. Check that the fork backend is running.',
   NETWORK_ERROR:
-    'The server could not be reached. A submitted import may already be saved; retrying it is safe.',
+    'The server could not be reached. A submitted change may already be saved; retry the same request to confirm.',
   REQUEST_FAILED: 'The operation could not be completed. No success has been confirmed.',
   CANCELLED: 'The request was cancelled.',
   INVALID_SERVER: 'Check the configured sync server URL before importing credentials.',
@@ -201,6 +219,14 @@ export function createManagedApi({
         accountsSchema,
         { signal }
       ),
+    account: (id: string, signal?: AbortSignal) =>
+      request(`/accounts/${encodeURIComponent(id)}`, accountSchema, { signal }),
+    setMembership: (id: string, change: MembershipChange, key: string, signal?: AbortSignal) =>
+      request(`/accounts/${encodeURIComponent(id)}/membership`, membershipResultSchema, {
+        body: change,
+        key,
+        signal,
+      }),
     previewImport: (upload: CredentialUpload, signal?: AbortSignal) =>
       request('/imports/preview', previewSchema, { body: upload, signal }),
     stageImport: (upload: CredentialUpload, key: string, signal?: AbortSignal) =>

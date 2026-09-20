@@ -83,6 +83,11 @@ test('every managed API requires server-verified owner credentials', async (t) =
       { method: 'GET', url: '/api/managed/status' },
       importRequest(),
       { method: 'GET', url: '/api/managed/accounts' },
+      {
+        method: 'POST',
+        url: `/api/managed/accounts/${randomUUID()}/membership`,
+        payload: { mode: 'lifetime', expectedVersion: 1 },
+      },
     ]) {
       const result = await app.inject({ ...request, headers: requestHeaders })
       assert.equal(result.statusCode, 401, result.body)
@@ -291,4 +296,84 @@ test('internal storage errors do not disclose SQL, credential data, or stack tra
   assert.ok(!response.body.includes('secret-password'))
   assert.ok(!response.body.includes('SELECT'))
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 0)
+})
+
+test('membership HTTP edits are passive, scoped, retry-safe, and retained across restart', async (t) => {
+  const { app, db, start, networkCalls } = await fixture(t)
+  const id = (await app.inject(importRequest())).json().accounts[0].id
+  const request = {
+    method: 'POST',
+    url: `/api/managed/accounts/${id}/membership`,
+    headers: { ...headers(), 'idempotency-key': randomUUID() },
+    payload: { mode: 'lifetime', expectedVersion: 1 },
+  }
+  const other = await app.inject({
+    ...request,
+    headers: { ...headers(secondAuth), 'idempotency-key': randomUUID() },
+  })
+  assert.equal(other.statusCode, 404)
+  const saved = await app.inject(request)
+  assert.equal(saved.statusCode, 200, saved.body)
+  assert.equal(saved.json().account.membershipType, 'lifetime')
+  assert.equal(saved.json().account.state, 'staged')
+  assert.equal(saved.json().account.expiry, null)
+  assert.equal(saved.json().jobId, null)
+  assert.equal(saved.headers['cache-control'], 'no-store')
+  assert.ok(!saved.body.includes('password'))
+  assert.ok(!saved.body.includes(syntheticAccount.password))
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+  const stale = await app.inject({
+    ...request,
+    headers: { ...headers(), 'idempotency-key': randomUUID() },
+  })
+  assert.equal(stale.statusCode, 409)
+  assert.equal(stale.json().error.code, 'VERSION_CONFLICT')
+  await app.close()
+  const restarted = await start()
+  const again = await restarted.app.inject(request)
+  assert.equal(again.statusCode, 200, again.body)
+  assert.equal(again.json().replayed, true)
+  const inventory = (
+    await restarted.app.inject({ url: '/api/managed/accounts', headers: headers() })
+  ).json()
+  assert.equal(inventory.accounts[0].membershipType, 'lifetime')
+  assert.equal(inventory.accounts[0].version, saved.json().account.version)
+  assert.equal(networkCalls(), 0)
+})
+
+test('membership HTTP rejects hidden cutoffs, missing versions, DST gaps, and oversized bodies', async (t) => {
+  const { app, db } = await fixture(t)
+  const id = (await app.inject(importRequest())).json().accounts[0].id
+  for (const [payload, status, code] of [
+    [{ mode: 'lifetime', expectedVersion: 1, local: '2027-01-01T00:00' }, 400, 'INVALID_INPUT'],
+    [{ mode: 'lifetime' }, 400, 'INVALID_INPUT'],
+    [{ mode: 'unset', expectedVersion: 1 }, 400, 'INVALID_INPUT'],
+    [{ mode: 'term', expectedVersion: 1, local: '2026-03-08T02:30' }, 422, 'NONEXISTENT_EXPIRY'],
+    [{ mode: 'term', expectedVersion: 1, local: '2026-11-01T01:30' }, 422, 'AMBIGUOUS_EXPIRY'],
+    [
+      { mode: 'term', expectedVersion: 1, local: '2026-11-01T01:30', offset: 60 },
+      422,
+      'INVALID_EXPIRY',
+    ],
+    [
+      { mode: 'lifetime', expectedVersion: 1, secret: 'SENSITIVE'.repeat(1024) },
+      413,
+      'REQUEST_TOO_LARGE',
+    ],
+  ]) {
+    const result = await app.inject({
+      method: 'POST',
+      url: `/api/managed/accounts/${id}/membership`,
+      headers: { ...headers(), 'idempotency-key': randomUUID() },
+      payload,
+    })
+    assert.equal(result.statusCode, status, result.body)
+    assert.equal(result.json().error.code, code)
+    assert.ok(!result.body.includes('SENSITIVE'))
+  }
+  assert.equal(
+    (await db.get('SELECT record_version FROM managed_accounts WHERE id = $1', [id]))
+      .record_version,
+    1
+  )
 })

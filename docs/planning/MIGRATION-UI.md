@@ -38,6 +38,7 @@ reject redirects so custom authentication headers are not forwarded elsewhere.
 - The temporary server was stopped and only its generated test directory removed.
   Synthetic fixture source remains in the repository for repeatable testing.
 
-Group activation, automated expiry enforcement, membership editing, and live
-offboarding are not enabled by this UI checkpoint. The lifetime follow-up is recorded
-in DECISIONS.md and is the next membership-control increment.
+This checkpoint passed all hosted checks in
+[run 35482177523](https://github.com/hossman39/AIOManager/actions/runs/35482177523).
+Subsequent dated/lifetime membership editing is recorded in [MEMBERSHIPS.md](MEMBERSHIPS.md).
+Group activation, automated expiry enforcement, and live offboarding remain disabled.

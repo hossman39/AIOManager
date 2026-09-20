@@ -2,6 +2,15 @@ const definitions = {
   UNAUTHORIZED: [401, 'A valid manager login is required.'],
   NOT_FOUND: [404, 'The managed record was not found.'],
   INVALID_INPUT: [400, 'The managed request is invalid.'],
+  INVALID_EXPIRY: [422, 'Select a valid New York date and time.'],
+  NONEXISTENT_EXPIRY: [
+    422,
+    'That New York time does not exist because the clock moves forward. Select a different time.',
+  ],
+  AMBIGUOUS_EXPIRY: [
+    422,
+    'That New York time occurs twice. Select the daylight or standard-time occurrence.',
+  ],
   IDEMPOTENCY_KEY_REQUIRED: [400, 'A request idempotency key is required.'],
   IDEMPOTENCY_CONFLICT: [409, 'This request key was already used for different content.'],
   VERSION_CONFLICT: [409, 'This record changed. Refresh it before trying again.'],

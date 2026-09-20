@@ -25,11 +25,18 @@ export async function registerManagedRoutes(app, repository) {
         }
         if (error.statusCode >= 400 && error.statusCode < 500) {
           const oversized = error.statusCode === 413
+          const importLimit = request.routeOptions.bodyLimit === MAX_CREDENTIAL_IMPORT_BYTES
           return reply.code(oversized ? 413 : 400).send({
             error: {
-              code: oversized ? 'FILE_TOO_LARGE' : 'INVALID_INPUT',
+              code: oversized
+                ? importLimit
+                  ? 'FILE_TOO_LARGE'
+                  : 'REQUEST_TOO_LARGE'
+                : 'INVALID_INPUT',
               message: oversized
-                ? 'Export exceeds the 10 MiB import limit.'
+                ? importLimit
+                  ? 'Export exceeds the 10 MiB import limit.'
+                  : 'The managed request exceeds its size limit.'
                 : 'The managed request is invalid.',
             },
           })
@@ -38,14 +45,12 @@ export async function registerManagedRoutes(app, repository) {
           { category: 'Managed', requestId: request.id },
           'Managed operation failed'
         )
-        return reply
-          .code(500)
-          .send({
-            error: {
-              code: 'INTERNAL_ERROR',
-              message: 'The operation could not be completed. No success has been recorded.',
-            },
-          })
+        return reply.code(500).send({
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'The operation could not be completed. No success has been recorded.',
+          },
+        })
       })
       routes.get('/status', (request) => repository.status(request.managedAuth))
       routes.get('/accounts', (request) =>
@@ -59,6 +64,14 @@ export async function registerManagedRoutes(app, repository) {
       )
       routes.get('/imports/:id', (request) =>
         repository.getBatch(request.managedAuth, request.params.id)
+      )
+      routes.post('/accounts/:id/membership', { bodyLimit: 4096 }, (request) =>
+        repository.setMembership(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
       )
       routes.post(
         '/imports/preview',

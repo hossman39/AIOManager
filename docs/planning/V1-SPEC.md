@@ -31,7 +31,7 @@ V1 does not include billing/payment processing, customer login portals, Nuvio, n
 | Imported clients | Start staged with all outbound changes disabled | Proposed migration safeguard |
 | Expiry | Exact date/time in America/New_York; disable every addon, including protected/personal entries, without deleting saved configuration | Confirmed |
 | Grace | None; no inferred extra entitlement | Implementation default |
-| Renewal | Set future expiry; restore current group plus individual configuration; retain account and prior group in Expired system view | Confirmed |
+| Renewal | Set future expiry or lifetime; restore current group plus individual configuration; retain account and prior group in Expired system view | Confirmed |
 | Missing expiry | No automatic cutoff; show that no expiry has been set | Proposed; never invent dates during migration |
 | Lifetime membership | Explicit option with no cutoff, distinct from an unset imported membership; group and personal-addon management continue normally | Confirmed follow-up |
 | Ungrouped accounts | Remain unmanaged/staged; no group write | Proposed |
