@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { deriveSyncToken } from '@/lib/crypto'
 import type { CredentialUpload } from '@/lib/managed/prepare-import'
+import { parseAddonConfiguration, type ManagedAddon } from '../../shared/addon-config.js'
 
 const issueSchema = z.object({
   row: z.number().int().positive(),
@@ -73,7 +74,11 @@ const membershipResultSchema = z.object({
   replayed: z.boolean(),
 })
 const statusSchema = z.object({
-  capabilities: z.object({ passiveImport: z.boolean(), providerWrites: z.boolean() }),
+  capabilities: z.object({
+    passiveImport: z.boolean(),
+    providerWrites: z.boolean(),
+    groupPublication: z.boolean().default(false),
+  }),
   writePaused: z.boolean(),
   ownerWritePaused: z.boolean(),
   safeMode: z.boolean(),
@@ -85,10 +90,153 @@ const statusSchema = z.object({
   }),
 })
 
+const addonsSchema = z.unknown().transform((value, ctx) => {
+  const parsed = parseAddonConfiguration(value)
+  if (!parsed.ok) {
+    ctx.addIssue({ code: 'custom', message: 'Invalid managed addon configuration' })
+    return z.NEVER
+  }
+  return parsed.addons
+})
+const groupSummarySchema = z.object({
+  id: z.uuid(),
+  name: z.string().min(1).max(120),
+  version: z.number().int().positive(),
+  publishedRevision: z.number().int().positive().nullable(),
+  archived: z.boolean(),
+  safeMode: z.boolean().nullable(),
+  effectiveSafeMode: z.boolean(),
+  addonCount: z.number().int().min(0).max(200),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+})
+const groupSchema = groupSummarySchema
+  .extend({ draft: addonsSchema })
+  .refine((group) => group.draft.length === group.addonCount)
+const groupResultSchema = z.object({ group: groupSchema, replayed: z.boolean() })
+const groupsSchema = z.object({
+  groups: z.array(groupSummarySchema).max(200),
+  nextCursor: z.uuid().nullable(),
+})
+const personalSchema = z.object({ account: accountSchema, addons: addonsSchema })
+const personalResultSchema = personalSchema.extend({
+  jobId: z.uuid().nullable(),
+  replayed: z.boolean(),
+})
+const assignmentResultSchema = z.object({
+  accounts: z.array(z.object({ account: accountSchema, jobId: z.uuid().nullable() })).max(200),
+  replayed: z.boolean(),
+})
+const cohortCount = z.number().int().min(0).max(1000)
+const publicationPreviewSchema = z
+  .object({
+    groupId: z.uuid(),
+    version: z.number().int().positive(),
+    publishedRevision: z.number().int().positive().nullable(),
+    counts: z.object({
+      active: cohortCount,
+      suspended: cohortCount,
+      staged: cohortCount,
+      offboarding: cohortCount,
+    }),
+    changes: z.object({
+      added: z.number().int().min(0).max(200),
+      removed: z.number().int().min(0).max(200),
+      changed: z.number().int().min(0).max(200),
+      reordered: z.boolean(),
+    }),
+    empty: z.boolean(),
+    unchanged: z.boolean(),
+    expiresAt: z.number().int(),
+    receipt: z.string().min(1).max(8192),
+  })
+  .refine(
+    (preview) => Object.values(preview.counts).reduce((total, count) => total + count, 0) <= 1000
+  )
+const publicationResultSchema = z
+  .object({
+    group: groupSchema,
+    deploymentId: z.uuid(),
+    revision: z.number().int().positive(),
+    queued: cohortCount,
+    unchanged: z.boolean(),
+    replayed: z.boolean(),
+  })
+  .refine(
+    (result) =>
+      result.group.publishedRevision === result.revision &&
+      (!result.unchanged || result.queued === 0)
+  )
+const deploymentSchema = z
+  .object({
+    id: z.uuid(),
+    groupId: z.uuid(),
+    revision: z.number().int().positive(),
+    createdAt: z.number().int(),
+    counts: z.object({
+      pending: cohortCount,
+      running: cohortCount,
+      retrying: cohortCount,
+      verified: cohortCount,
+      failed: cohortCount,
+      superseded: cohortCount,
+    }),
+    skipped: z.object({ staged: cohortCount, offboarding: cohortCount }),
+    members: z
+      .array(
+        z.object({
+          accountId: z.uuid(),
+          jobId: z.uuid(),
+          policyVersion: z.number().int().positive(),
+          target: z.enum(['active', 'suspended']),
+          status: z.enum(['pending', 'running', 'retrying', 'verified', 'failed', 'superseded']),
+          errorCode: z
+            .enum([
+              'LEASE_EXPIRED',
+              'NETWORK_ERROR',
+              'RATE_LIMITED',
+              'PROVIDER_UNAVAILABLE',
+              'OUTCOME_UNKNOWN',
+              'INVALID_CREDENTIALS',
+              'VERIFICATION_MISMATCH',
+              'MANIFEST_UNAVAILABLE',
+              'DATA_UNREADABLE',
+            ])
+            .nullable(),
+        })
+      )
+      .max(1000),
+  })
+  .refine(
+    (deployment) =>
+      new Set(deployment.members.map((member) => member.jobId)).size ===
+        deployment.members.length &&
+      Object.entries(deployment.counts).every(
+        ([status, count]) =>
+          deployment.members.filter((member) => member.status === status).length === count
+      )
+  )
+const manifestResultSchema = z.object({ manifest: z.unknown() }).transform((value, ctx) => {
+  const parsed = parseAddonConfiguration([
+    { transportUrl: 'https://validation.invalid/manifest.json', manifest: value.manifest },
+  ])
+  if (!parsed.ok) {
+    ctx.addIssue({ code: 'custom', message: 'Invalid managed manifest response' })
+    return z.NEVER
+  }
+  return { manifest: parsed.addons[0].manifest }
+})
+
 export type ManagedImportPreview = z.infer<typeof previewSchema>
 export type ManagedImportBatch = z.infer<typeof batchSchema>
 export type ManagedAccount = z.infer<typeof accountSchema>
 export type ManagedStatus = z.infer<typeof statusSchema>
+export type ManagedGroup = z.infer<typeof groupSchema>
+export type ManagedGroupSummary = z.infer<typeof groupSummarySchema>
+export type ManagedPublicationPreview = z.infer<typeof publicationPreviewSchema>
+export type ManagedDeployment = z.infer<typeof deploymentSchema>
+export type ManagedGroupDraft = { name: string; addons: ManagedAddon[]; safeMode: boolean | null }
+export type ManagedPublication = { expectedVersion: number; receipt: string; allowEmpty: boolean }
 export type MembershipChange =
   | { mode: 'lifetime'; expectedVersion: number }
   | { mode: 'term'; expectedVersion: number; local: string; offset?: number }
@@ -103,6 +251,27 @@ const errorMessages = {
     'This retry identifier was used for a different change. Reload the saved values.',
   VERSION_CONFLICT: 'The record changed. Refresh it before trying again.',
   INVALID_STATE: 'This account cannot be changed in its current management state.',
+  INVALID_ADDON_CONFIG: 'Provide a complete, valid addon configuration.',
+  ADDON_CONFIG_TOO_LARGE: 'An addon list exceeds 200 entries or 2 MiB.',
+  DUPLICATE_ADDON_URL: 'An addon URL appears more than once. Keep only the intended entry.',
+  ADDON_LAYER_CONFLICT:
+    'An addon URL appears in both the group and personal setup. Resolve the duplicate explicitly.',
+  GROUP_NOT_PUBLISHED: 'Publish the destination group before assigning active users.',
+  GROUP_TOO_LARGE: 'This publication exceeds the 1,000-member limit.',
+  PUBLICATION_UNAVAILABLE: 'Group publication is not available on this backend.',
+  PREVIEW_STALE: 'This preview expired or the group or its members changed. Prepare a new preview.',
+  EMPTY_PUBLICATION_CONFIRMATION:
+    'Confirm the intentionally empty or entirely disabled group setup before publishing.',
+  MANIFEST_UNAVAILABLE:
+    'A required manifest could not be reached or validated. No publication was saved.',
+  MANIFEST_UNSAFE_URL:
+    'Use a direct trusted manifest URL. Private services require an exact server-side origin allowance.',
+  MANIFEST_INVALID: 'The manifest is incomplete, invalid, or larger than 2 MiB.',
+  MANIFEST_CONFIGURATION_REQUIRED:
+    'Configure the addon in its own app, then paste the configured manifest URL.',
+  MANIFEST_ID_MISMATCH: 'The URL now serves a different addon. Review its saved configuration.',
+  MANIFEST_TIMEOUT: 'Manifest validation timed out or was cancelled. Try the preview again.',
+  MANIFEST_BUSY: 'Manifest validation is busy. Wait for the current checks to finish.',
   INVALID_EXPIRY: 'Choose a valid New York date and time.',
   NONEXISTENT_EXPIRY:
     'That New York time does not exist because the clocks move forward. Choose another time.',
@@ -224,6 +393,60 @@ export function createManagedApi({
       ),
     account: (id: string, signal?: AbortSignal) =>
       request(`/accounts/${encodeURIComponent(id)}`, accountSchema, { signal }),
+    groups: (after = '', signal?: AbortSignal) =>
+      request(
+        `/groups?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`,
+        groupsSchema,
+        { signal }
+      ),
+    group: (id: string, signal?: AbortSignal) =>
+      request(`/groups/${encodeURIComponent(id)}`, groupSchema, { signal }),
+    createGroup: (draft: ManagedGroupDraft, key: string, signal?: AbortSignal) =>
+      request('/groups', groupResultSchema, { body: draft, key, signal }),
+    saveGroupDraft: (
+      id: string,
+      draft: ManagedGroupDraft & { expectedVersion: number },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/groups/${encodeURIComponent(id)}/draft`, groupResultSchema, {
+        body: draft,
+        key,
+        signal,
+      }),
+    personalAddons: (id: string, signal?: AbortSignal) =>
+      request(`/accounts/${encodeURIComponent(id)}/personal-addons`, personalSchema, { signal }),
+    setPersonalAddons: (
+      id: string,
+      body: { addons: ManagedAddon[]; expectedVersion: number },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/accounts/${encodeURIComponent(id)}/personal-addons`, personalResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    assignGroup: (
+      body: { groupId: string | null; accounts: { id: string; expectedVersion: number }[] },
+      key: string,
+      signal?: AbortSignal
+    ) => request('/accounts/assign-group', assignmentResultSchema, { body, key, signal }),
+    resolveManifest: (url: string, signal?: AbortSignal) =>
+      request('/manifests/resolve', manifestResultSchema, { body: { url }, signal }),
+    previewGroupPublication: (id: string, expectedVersion: number, signal?: AbortSignal) =>
+      request(`/groups/${encodeURIComponent(id)}/preview`, publicationPreviewSchema, {
+        body: { expectedVersion },
+        signal,
+      }),
+    publishGroup: (id: string, body: ManagedPublication, key: string, signal?: AbortSignal) =>
+      request(`/groups/${encodeURIComponent(id)}/publish`, publicationResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    deployment: (id: string, signal?: AbortSignal) =>
+      request(`/deployments/${encodeURIComponent(id)}`, deploymentSchema, { signal }),
     setMembership: (id: string, change: MembershipChange, key: string, signal?: AbortSignal) =>
       request(`/accounts/${encodeURIComponent(id)}/membership`, membershipResultSchema, {
         body: change,

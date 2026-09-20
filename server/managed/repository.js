@@ -398,7 +398,11 @@ export function createManagedRepository({
         [owner]
       )
       return {
-        capabilities: { passiveImport: true, providerWrites: false },
+        capabilities: {
+          passiveImport: true,
+          providerWrites: false,
+          groupPublication: typeof validateManifests === 'function',
+        },
         writePaused: true, // No writer is enabled in this slice, even if a DB flag changes.
         ownerWritePaused: settings ? settings.write_paused === 1 : true,
         safeMode: settings ? settings.safe_mode === 1 : true,

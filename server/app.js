@@ -14,6 +14,7 @@ import { migrateManagedSchema } from './managed/schema.js'
 import { initializeManagedCrypto, equalSecret } from './managed/crypto.js'
 import { createManagedRepository } from './managed/repository.js'
 import { registerManagedRoutes } from './managed/routes.js'
+import { createManagedManifestService } from './managed/manifests.js'
 // let LZString import removed - obsolete
 
 // Construction does not bind a port, install signal handlers, or start jobs.
@@ -321,10 +322,20 @@ export async function buildServer(options = {}) {
     await db.exec(schema)
     await migrateManagedSchema(db)
     const managedCrypto = await initializeManagedCrypto(db, keys)
+    const manifestService =
+      options.manifestService ??
+      createManagedManifestService({
+        privateOrigins: (env.MANAGED_MANIFEST_PRIVATE_ORIGINS ?? '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean),
+      })
+    fastify.addHook('preClose', async () => manifestService.close())
     const managedRepository = createManagedRepository({
       db,
       crypto: managedCrypto,
       legacyKeys: FALLBACK_KEYS,
+      validateManifests: manifestService.validateManifests,
     })
 
     // Migration: Add addon_list column if it doesn't exist (for existing databases)
@@ -472,7 +483,7 @@ export async function buildServer(options = {}) {
 
     // Register Gzip Compression (Reduces network payload size by ~80%)
     await fastify.register(fastifyCompress, { global: true })
-    await registerManagedRoutes(fastify, managedRepository)
+    await registerManagedRoutes(fastify, managedRepository, manifestService)
 
     // Serve Static Files
     const distPath = options.staticDir || path.join(__dirname, '../dist')

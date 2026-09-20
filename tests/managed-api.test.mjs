@@ -9,6 +9,7 @@ import { DB } from '../server/db.js'
 import { encrypt, decrypt } from '../server/crypto.js'
 import { syntheticAccount, syntheticKey, firstAuth, secondAuth } from './managed-contract.mjs'
 import { configuredAddon } from './fixtures/addon-config.mjs'
+import { createManagedManifestService } from '../server/managed/manifests.js'
 
 const headers = (auth = firstAuth) => ({
   'x-manager-id': auth.owner,
@@ -22,7 +23,7 @@ const importRequest = (extra = {}) => ({
   ...extra,
 })
 
-async function fixture(t) {
+async function fixture(t, manifestOptions = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'aiomanager-managed-test-'))
   const apps = []
   let networkCalls = 0
@@ -51,6 +52,11 @@ async function fixture(t) {
       serveStatic: false,
       fetch: noNetwork,
       httpClient: { post: noNetwork },
+      manifestService: createManagedManifestService({
+        resolve: noNetwork,
+        read: noNetwork,
+        ...manifestOptions,
+      }),
     })
     apps.push(app)
     return { app, db }
@@ -86,6 +92,18 @@ test('every managed API requires server-verified owner credentials', async (t) =
       { method: 'GET', url: '/api/managed/accounts' },
       { method: 'GET', url: '/api/managed/groups' },
       { method: 'POST', url: '/api/managed/groups', payload: { name: 'Synthetic' } },
+      {
+        method: 'POST',
+        url: '/api/managed/manifests/resolve',
+        payload: { url: 'https://not-called.invalid/manifest.json' },
+      },
+      {
+        method: 'POST',
+        url: `/api/managed/groups/${randomUUID()}/preview`,
+        payload: { expectedVersion: 1 },
+      },
+      { method: 'POST', url: `/api/managed/groups/${randomUUID()}/publish`, payload: {} },
+      { method: 'GET', url: `/api/managed/deployments/${randomUUID()}` },
       { method: 'POST', url: '/api/managed/accounts/assign-group', payload: {} },
       { method: 'GET', url: `/api/managed/accounts/${randomUUID()}/personal-addons` },
       {
@@ -452,3 +470,289 @@ test('HTTP group validation cannot turn malformed addon configuration into an em
   }
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_groups')).count, 0)
 })
+
+const managedPost = (url, payload, auth = firstAuth) => ({
+  method: 'POST',
+  url: `/api/managed${url}`,
+  headers: { ...headers(auth), 'idempotency-key': randomUUID() },
+  payload,
+})
+const enabledFixtureAddon = () => {
+  const addon = configuredAddon()
+  addon.flags.enabled = true
+  addon.manifest.types = ['movie']
+  return addon
+}
+const fakePublicDns = async () => [{ address: '8.8.8.8', family: 4 }]
+const fakeManifestResponse = () => ({
+  status: 200,
+  headers: {},
+  body: Buffer.from(JSON.stringify(enabledFixtureAddon().manifest)),
+})
+
+test('manifest resolve HTTP is authenticated, read-only, bounded and redacts failures', async (t) => {
+  let reads = 0
+  const { app, db, networkCalls } = await fixture(t, {
+    resolve: fakePublicDns,
+    read: async () => {
+      reads++
+      return fakeManifestResponse()
+    },
+  })
+  const result = await app.inject(
+    managedPost('/manifests/resolve', { url: enabledFixtureAddon().transportUrl })
+  )
+  assert.equal(result.statusCode, 200, result.body)
+  assert.deepEqual(result.json().manifest, enabledFixtureAddon().manifest)
+  assert.equal(result.headers['cache-control'], 'no-store')
+  assert.equal(reads, 1)
+  for (const [payload, status, code] of [
+    [{ url: 'https://127.0.0.1/GroupToken' }, 422, 'MANIFEST_UNSAFE_URL'],
+    [
+      { url: enabledFixtureAddon().transportUrl, headers: { authorization: 'GroupToken' } },
+      400,
+      'INVALID_INPUT',
+    ],
+    [{ url: 'https://private.invalid/' + 'GroupToken'.repeat(10_000) }, 413, 'REQUEST_TOO_LARGE'],
+  ]) {
+    const failed = await app.inject(managedPost('/manifests/resolve', payload))
+    assert.equal(failed.statusCode, status, failed.body)
+    assert.equal(failed.json().error.code, code)
+    assert.ok(!failed.body.includes('GroupToken'))
+    assert.ok(!failed.body.includes('private.invalid'))
+  }
+  assert.equal(reads, 1)
+  for (const table of [
+    'managed_accounts',
+    'managed_groups',
+    'managed_group_revisions',
+    'managed_jobs',
+  ])
+    assert.equal((await db.get(`SELECT COUNT(*) AS count FROM ${table}`)).count, 0)
+  assert.equal(networkCalls(), 0)
+})
+
+test('publication HTTP commits a scoped mixed cohort, reports queued work, and replays after restart', async (t) => {
+  let reads = 0
+  const { app, db, start, networkCalls } = await fixture(t, {
+    resolve: fakePublicDns,
+    read: async () => {
+      reads++
+      return fakeManifestResponse()
+    },
+  })
+  const imported = await app.inject(
+    importRequest({
+      payload: {
+        accounts: Array.from({ length: 3 }, (_, i) => ({
+          email: `publication-${i}@example.invalid`,
+          password: 'SyntheticPassword',
+        })),
+      },
+    })
+  )
+  const accounts = imported.json().accounts
+  const created = await app.inject(
+    managedPost('/groups', { name: 'Synthetic publication', addons: [enabledFixtureAddon()] })
+  )
+  const group = created.json().group
+  assert.equal(
+    (
+      await app.inject(
+        managedPost('/accounts/assign-group', {
+          groupId: group.id,
+          accounts: accounts.map(({ id }) => ({ id, expectedVersion: 1 })),
+        })
+      )
+    ).statusCode,
+    200
+  )
+  await app.inject(
+    managedPost(`/accounts/${accounts[0].id}/membership`, { mode: 'lifetime', expectedVersion: 2 })
+  )
+  await app.inject(
+    managedPost(`/accounts/${accounts[1].id}/membership`, {
+      mode: 'term',
+      local: '2020-01-01T12:00',
+      expectedVersion: 2,
+    })
+  )
+  // Internal synthetic enrollment only: there is still no HTTP activation path.
+  for (const { id } of accounts.slice(0, 2))
+    await db.run(
+      "UPDATE managed_accounts SET state = 'active', provider_key = $1, provider_enc = 'synthetic-enrollment' WHERE id = $2",
+      [`fake-subject-${id}`, id]
+    )
+  const denied = await app.inject(
+    managedPost(`/groups/${group.id}/preview`, { expectedVersion: group.version }, secondAuth)
+  )
+  assert.equal(denied.statusCode, 404)
+  assert.equal(reads, 0)
+  const preview = await app.inject(
+    managedPost(`/groups/${group.id}/preview`, { expectedVersion: group.version })
+  )
+  assert.equal(preview.statusCode, 200, preview.body)
+  assert.deepEqual(preview.json().counts, { active: 1, suspended: 1, staged: 1, offboarding: 0 })
+  assert.ok(!preview.body.includes('GroupToken'))
+  const request = managedPost(`/groups/${group.id}/publish`, {
+    expectedVersion: group.version,
+    receipt: preview.json().receipt,
+  })
+  const published = await app.inject(request)
+  assert.equal(published.statusCode, 201, published.body)
+  assert.equal(published.json().queued, 2)
+  assert.equal(published.json().revision, 1)
+  assert.deepEqual(published.json().group.draft, [enabledFixtureAddon()])
+  assert.equal(reads, 1)
+  const progressRequest = {
+    url: `/api/managed/deployments/${published.json().deploymentId}`,
+    headers: headers(),
+  }
+  const progress = await app.inject(progressRequest)
+  assert.equal(progress.statusCode, 200, progress.body)
+  assert.equal(progress.json().counts.pending, 2)
+  assert.equal(progress.json().counts.verified, 0)
+  assert.deepEqual(
+    progress
+      .json()
+      .members.map(({ target }) => target)
+      .sort(),
+    ['active', 'suspended']
+  )
+  assert.equal(progress.json().skipped.staged, 1)
+  assert.ok(!progress.body.includes('GroupToken'))
+  assert.ok(!progress.body.includes('SyntheticPassword'))
+  assert.equal(
+    (await app.inject({ ...progressRequest, headers: headers(secondAuth) })).statusCode,
+    404
+  )
+  const status = (await app.inject({ url: '/api/managed/status', headers: headers() })).json()
+  assert.equal(status.capabilities.groupPublication, true)
+  assert.equal(status.capabilities.providerWrites, false)
+  assert.equal(status.writePaused, true)
+  await app.close()
+  const restarted = await start()
+  const replayed = await restarted.app.inject(request)
+  assert.equal(replayed.statusCode, 200, replayed.body)
+  assert.equal(replayed.json().replayed, true)
+  assert.equal(replayed.json().deploymentId, published.json().deploymentId)
+  assert.equal((await restarted.db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 2)
+  assert.deepEqual((await restarted.app.inject(progressRequest)).json(), progress.json())
+  assert.equal(reads, 1)
+  assert.equal(networkCalls(), 0)
+})
+
+test('HTTP publication refuses failed validation, invalid receipts and oversized publication bodies', async (t) => {
+  let failed = true
+  const { app, db } = await fixture(t, {
+    resolve: fakePublicDns,
+    read: async () => {
+      if (failed) throw new Error('https://private.invalid/GroupToken')
+      return fakeManifestResponse()
+    },
+  })
+  const group = (
+    await app.inject(managedPost('/groups', { name: 'Synthetic', addons: [enabledFixtureAddon()] }))
+  ).json().group
+  const prepare = () =>
+    app.inject(managedPost(`/groups/${group.id}/preview`, { expectedVersion: group.version }))
+  const invalid = await prepare()
+  assert.equal(invalid.statusCode, 422)
+  assert.equal(invalid.json().error.code, 'MANIFEST_UNAVAILABLE')
+  assert.ok(!invalid.body.includes('GroupToken'))
+  failed = false
+  const preview = (await prepare()).json()
+  for (const [receipt, status, code] of [
+    ['tampered', 409, 'PREVIEW_STALE'],
+    ['GroupToken'.repeat(2000), 413, 'REQUEST_TOO_LARGE'],
+  ]) {
+    const result = await app.inject(
+      managedPost(`/groups/${group.id}/publish`, { expectedVersion: group.version, receipt })
+    )
+    assert.equal(result.statusCode, status, result.body)
+    assert.equal(result.json().error.code, code)
+    assert.ok(!result.body.includes('GroupToken'))
+  }
+  await app.inject(
+    managedPost(`/groups/${group.id}/draft`, {
+      name: group.name,
+      addons: [configuredAddon()],
+      safeMode: null,
+      expectedVersion: group.version,
+    })
+  )
+  const stale = await app.inject(
+    managedPost(`/groups/${group.id}/publish`, {
+      expectedVersion: group.version,
+      receipt: preview.receipt,
+    })
+  )
+  assert.equal(stale.statusCode, 409, stale.body)
+  for (const table of ['managed_group_revisions', 'managed_jobs', 'managed_deployments'])
+    assert.equal((await db.get(`SELECT COUNT(*) AS count FROM ${table}`)).count, 0)
+})
+
+test('HTTP empty publication needs explicit consent and does not activate staged accounts', async (t) => {
+  const { app, db, networkCalls } = await fixture(t)
+  const group = (await app.inject(managedPost('/groups', { name: 'Intentionally empty' }))).json()
+    .group
+  const preview = (
+    await app.inject(managedPost(`/groups/${group.id}/preview`, { expectedVersion: group.version }))
+  ).json()
+  assert.equal(preview.empty, true)
+  const body = { expectedVersion: group.version, receipt: preview.receipt }
+  const denied = await app.inject(managedPost(`/groups/${group.id}/publish`, body))
+  assert.equal(denied.statusCode, 409, denied.body)
+  assert.equal(denied.json().error.code, 'EMPTY_PUBLICATION_CONFIRMATION')
+  const saved = await app.inject(
+    managedPost(`/groups/${group.id}/publish`, { ...body, allowEmpty: true })
+  )
+  assert.equal(saved.statusCode, 201, saved.body)
+  assert.equal(saved.json().queued, 0)
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+  assert.equal(networkCalls(), 0)
+})
+
+test(
+  'disconnecting a real HTTP preview cancels its manifest read',
+  { timeout: 5000 },
+  async (t) => {
+    const started = Promise.withResolvers()
+    const cancelled = Promise.withResolvers()
+    const { app } = await fixture(t, {
+      resolve: fakePublicDns,
+      read: (_url, _addresses, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              cancelled.resolve()
+              reject(new Error('Synthetic cancellation'))
+            },
+            { once: true }
+          )
+          started.resolve()
+        }),
+    })
+    const group = (
+      await app.inject(
+        managedPost('/groups', { name: 'Cancellation', addons: [enabledFixtureAddon()] })
+      )
+    ).json().group
+    await app.listen({ port: 0, host: '127.0.0.1' })
+    const controller = new AbortController()
+    const request = fetch(
+      `http://127.0.0.1:${app.server.address().port}/api/managed/groups/${group.id}/preview`,
+      {
+        method: 'POST',
+        headers: { ...headers(), 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedVersion: group.version }),
+        signal: controller.signal,
+      }
+    )
+    await started.promise
+    controller.abort()
+    await assert.rejects(request)
+    await cancelled.promise
+  }
+)

@@ -31,6 +31,24 @@ const definitions = {
     422,
     'A required addon manifest could not be validated. No revision was published.',
   ],
+  MANIFEST_UNSAFE_URL: [
+    422,
+    'The manifest URL or destination is not permitted. Use a direct trusted URL.',
+  ],
+  MANIFEST_INVALID: [422, 'The manifest response is incomplete, invalid, or exceeds 2 MiB.'],
+  MANIFEST_CONFIGURATION_REQUIRED: [
+    422,
+    'Configure the addon in its own app, then use its configured manifest URL.',
+  ],
+  MANIFEST_ID_MISMATCH: [
+    422,
+    'The URL now serves a different addon. Review the saved addon before publishing.',
+  ],
+  MANIFEST_TIMEOUT: [
+    504,
+    'Manifest validation timed out or was cancelled. No revision was published.',
+  ],
+  MANIFEST_BUSY: [503, 'Manifest validation is busy. Try again after the current checks finish.'],
   PREVIEW_STALE: [
     409,
     'This publication preview is invalid, expired, or changed. Prepare it again.',

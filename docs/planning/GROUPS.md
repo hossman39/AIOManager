@@ -63,7 +63,8 @@ outside a database transaction, then rechecks the draft version and cohort. It
 returns a short-lived encrypted receipt bound to owner/group, draft digest, group
 version, cohort policies/targets, safe-mode default, and validation time. Missing
 validation adapter means publication is unavailable, not implicitly validated.
-The production HTTP/UI publication path remains absent until that adapter is ready.
+The HTTP path is enabled only with the server's trusted adapter; authoring UI and
+provider execution remain separate increments.
 
 Commit uses the existing request-idempotency transaction. A committed retry replays
 before checking receipt age, so an expired preview cannot hide a successful prior
@@ -113,9 +114,9 @@ G1 also passed all five hosted jobs, including 50 real PostgreSQL cases, in
 
 ## G2 persistence evidence
 
-Internal preview/publication/deployment methods now implement the protocol above.
-The application does not supply a trusted validator or expose publication routes
-yet. Synthetic tests inject validation; no provider collection is read or written.
+Internal preview/publication/deployment methods implement the protocol above.
+The initial persistence checkpoint used injected validation only; the subsequent
+adapter/HTTP increment is described below. No provider collection is read or written.
 Published payloads are checked against their authenticated digests when read.
 
 Local verification: 181 passed, 70 PostgreSQL cases reserved for hosted CI, zero
@@ -130,6 +131,21 @@ Isolated synthetic preview plus publication samples were 12-16 ms for 40 users,
 19-20 ms for 100, and 226-238 ms for 1,000. They use an immediate fake validator
 and no provider IO: these are not p95, VPS, or remote rollout measurements.
 
-Trusted manifest fetching, authoring UI, safe-mode projection against a fresh
-provider read, and every existing writer's gate remain required before enabling
-any account.
+G2 persistence also passed all five hosted jobs, including 70 PostgreSQL tests,
+in [run 35486172593](https://github.com/hossman39/AIOManager/actions/runs/35486172593).
+
+## Manifest adapter and HTTP/client increment
+
+The bounded read-only [manifest adapter](MANIFEST-VALIDATION.md) is now connected
+to authenticated resolve/preview/publish/progress routes and the typed browser
+client. Publication is available as a queued database operation; activation and
+provider collection writes remain disabled. Staged users are never activated by
+publication, and queued work is not presented as verified.
+
+Routes added under `/api/managed`: `POST /manifests/resolve`,
+`POST /groups/:id/preview`, `POST /groups/:id/publish`, and
+`GET /deployments/:id`. Preview cancellation aborts its network read. A successful
+publication can be replayed after restart without fetching manifests again.
+
+Authoring UI, safe-mode projection against a fresh provider read, and every
+existing writer's gate remain required before enabling any account.

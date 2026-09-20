@@ -2,9 +2,29 @@ import { MAX_CREDENTIAL_IMPORT_BYTES } from '../../shared/credential-import.js'
 import { MAX_ADDON_CONFIG_BYTES } from '../../shared/addon-config.js'
 import { ManagedError } from './errors.js'
 import { parseImportBody } from './repository.js'
+import { z } from 'zod'
+
+const manifestInput = z.strictObject({ url: z.string().min(1).max(65_536) })
+
+async function cancelReadOnDisconnect(request, reply, work) {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  const closed = () => {
+    if (!reply.raw.writableFinished) abort()
+  }
+  request.raw.once('aborted', abort)
+  reply.raw.once('close', closed)
+  try {
+    if (request.raw.aborted) abort()
+    return await work(controller.signal)
+  } finally {
+    request.raw.removeListener('aborted', abort)
+    reply.raw.removeListener('close', closed)
+  }
+}
 
 /** Encapsulation keeps strict managed error handling separate from legacy APIs. */
-export async function registerManagedRoutes(app, repository) {
+export async function registerManagedRoutes(app, repository, manifestService) {
   await app.register(
     async (routes) => {
       routes.decorateRequest('managedAuth', null)
@@ -54,6 +74,13 @@ export async function registerManagedRoutes(app, repository) {
         })
       })
       routes.get('/status', (request) => repository.status(request.managedAuth))
+      routes.post('/manifests/resolve', { bodyLimit: 65 * 1024 }, (request, reply) => {
+        const parsed = manifestInput.safeParse(request.body)
+        if (!parsed.success) throw new ManagedError('INVALID_INPUT')
+        return cancelReadOnDisconnect(request, reply, async (signal) => ({
+          manifest: await manifestService.fetchManifest(parsed.data.url, { signal }),
+        }))
+      })
       routes.get('/groups', (request) =>
         repository.listGroups(request.managedAuth, {
           ...(request.query.limit === undefined ? {} : { limit: Number(request.query.limit) }),
@@ -77,6 +104,25 @@ export async function registerManagedRoutes(app, repository) {
           request.body,
           request.headers['idempotency-key']
         )
+      )
+      routes.post('/groups/:id/preview', { bodyLimit: 4096 }, (request, reply) =>
+        cancelReadOnDisconnect(request, reply, (signal) =>
+          repository.previewGroupPublication(request.managedAuth, request.params.id, request.body, {
+            signal,
+          })
+        )
+      )
+      routes.post('/groups/:id/publish', { bodyLimit: 12 * 1024 }, async (request, reply) => {
+        const result = await repository.publishGroup(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+        return reply.code(result.replayed || result.unchanged ? 200 : 201).send(result)
+      })
+      routes.get('/deployments/:id', (request) =>
+        repository.getDeployment(request.managedAuth, request.params.id)
       )
       routes.post('/accounts/assign-group', { bodyLimit: 64 * 1024 }, (request) =>
         repository.assignGroup(

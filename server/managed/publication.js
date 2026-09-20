@@ -44,7 +44,7 @@ const parse = (schema, input) => {
   return result.data
 }
 
-/** Internal publication persistence; no HTTP route until trusted manifest validation exists. */
+/** Publication persistence; network validation is injected and always outside transactions. */
 export function createGroupPublicationRepository({
   db,
   crypto,
@@ -138,7 +138,7 @@ export function createGroupPublicationRepository({
   }
 
   return {
-    async previewGroupPublication(auth, id, input) {
+    async previewGroupPublication(auth, id, input, { signal } = {}) {
       const value = parse(previewInput, input)
       const owner = await authorize(auth)
       const initial = await group(db, owner, id)
@@ -151,9 +151,10 @@ export function createGroupPublicationRepository({
       // It may reject unreachable/configuration-required manifests, but cannot
       // overwrite the operator's curated metadata/catalog choices.
       try {
-        if ((await validateManifests(structuredClone(addons))) !== true)
+        if ((await validateManifests(structuredClone(addons), { signal })) !== true)
           throw new Error('No validation confirmation')
-      } catch {
+      } catch (error) {
+        if (error instanceof ManagedError && error.code.startsWith('MANIFEST_')) throw error
         throw new ManagedError('MANIFEST_UNAVAILABLE')
       }
       return ownerTransaction(auth, async (tx, currentOwner, ownerRow, timestamp) => {
