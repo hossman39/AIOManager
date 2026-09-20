@@ -70,6 +70,11 @@ early or overlap a later execution. Pure projection tests cover clean descriptor
 retention and all eight Cinemeta-option combinations.
 
 Local and hosted check results are recorded in [PROGRESS.md](PROGRESS.md).
+Code checkpoint `d3440b5c49a4fee6dcfeedfe715d124c82b3447e` passed Windows/Linux,
+all 95 PostgreSQL cases, and AMD64/ARM64 containers in
+[run 35509002178](https://github.com/hossman39/AIOManager/actions/runs/35509002178).
+The local suite passed 256 tests; typecheck, lint, build and both production
+dependency audits passed. No image publication or deployment ran.
 
 ## Remaining integration and release work
 
@@ -80,6 +85,12 @@ Local and hosted check results are recorded in [PROGRESS.md](PROGRESS.md).
 2. Implement the bounded native Stremio HTTP adapter, shared request budgets with
    existing reads/writers, session/enrollment validation and generic-proxy ownership
    checks. The injected interface has no network fallback and never registers users.
+   The concrete collection-write entry points are `/api/stremio-proxy` and
+   `syncStremioLive` in `server/app.js`, plus `setAddonCollection` in
+   `src/api/stremio-client.ts` feeding that proxy. Gate actual server-resolved
+   provider identity, never the browser's `x-account-context` label. Existing
+   `backgroundWorkers` startup in `server/index.js` controls legacy automation;
+   it must not implicitly activate the new runner.
 3. Connect reviewed activation, first-sync choices and operational status. Keep
    the existing deliberate new-account creation workflow separate from migration.
 4. Wire startup/30-second expiry scans and recovery polling into lifecycle controls.

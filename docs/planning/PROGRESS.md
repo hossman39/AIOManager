@@ -64,6 +64,10 @@ clock rollback, all Cinemeta option combinations, and a synthetic 100-account
 scan/execution cohort. The existing build warnings remain. No dependency change,
 live provider call, activation, scheduler startup or deployment is included. See
 [WORKER-FOUNDATION.md](WORKER-FOUNDATION.md) for the integration boundary.
+Code checkpoint `d3440b5` passed all five hosted jobs, including 95 PostgreSQL
+cases and both container architectures, in
+[run 35509002178](https://github.com/hossman39/AIOManager/actions/runs/35509002178).
+No image publication or production deployment ran.
 
 ## First-increment evidence (historical)
 
