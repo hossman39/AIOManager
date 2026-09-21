@@ -17,7 +17,7 @@ Migration 6 retains encrypted-identity lookup links after verified removal, so
 stale browser copies cannot recreate an account. The client also removes those
 copies and their old automation rules. Backups include the links. Connection
 alone never activates an account or queues provider work. The suite now passes
-296 local tests, with 111 PostgreSQL cases reserved for hosted CI; typecheck,
+298 local tests, with 111 PostgreSQL cases reserved for hosted CI; typecheck,
 lint and the production build pass. Browser upgrade testing confirms an old
 account and its imported counterpart become one row with existing settings.
 The isolated browser also verifies fresh account addition, a London expiry,
@@ -27,6 +27,13 @@ completion action. Checkpoint `f4f5fd7` passed all five hosted jobs in
 [run 35655487090](https://github.com/hossman39/AIOManager/actions/runs/35655487090),
 including all 111 PostgreSQL cases and both container architectures. A stale
 membership-save notice is cleared when opening the next account editor.
+The saved-login completion rehearsal also exposed an existing account-store bug:
+credential edits refreshed the token without retaining the new email/password.
+Verified edits now persist the exact password encrypted, and the edit form can
+complete accounts with no known email. Two store regressions cover successful
+completion, unchanged credentials on a rename, and a rejected login leaving the
+original account intact. A dropped connection response is recoverable with Retry
+account setup and creates no duplicate account.
 
 The first account-add acceptance report exposed an upstream vault initialization
 bug: registration accepted a short password, claimed the remote identity, swallowed

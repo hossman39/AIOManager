@@ -1047,6 +1047,10 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
                         const authKey =
                               data.authKey || (await loginWithCredentials(data.email!, data.password!)).authKey
                         updatedAccount.authKey = await encrypt(authKey, getEncryptionKey())
+                        if (!data.authKey && data.email && data.password) {
+                              updatedAccount.email = data.email
+                              updatedAccount.password = await encrypt(data.password, getEncryptionKey())
+                        }
                         const addons = await getAddons(authKey, updatedAccount.id)
                         updatedAccount.addons = addons.map((a) => ({
                               ...a,

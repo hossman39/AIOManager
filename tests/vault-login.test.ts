@@ -90,10 +90,14 @@ test('a short new password is rejected before registering or changing local data
 
 test('registration publishes the actual vault salt and works in a fresh browser', async (t) => {
   let initialState: Record<string, unknown> = {}
-  t.mock.method(globalThis, 'fetch', async (_url: string | URL | Request, options?: RequestInit) => {
-    initialState = JSON.parse(options?.body as string)
-    return Response.json({})
-  })
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (_url: string | URL | Request, options?: RequestInit) => {
+      initialState = JSON.parse(options?.body as string)
+      return Response.json({})
+    }
+  )
   await useSyncStore.getState().register(password)
   const owner = useSyncStore.getState().auth.id
   const originalKey = useAuthStore.getState().encryptionKey!
@@ -204,4 +208,81 @@ test('silent login also propagates vault unlock failures', async (t) => {
   await assert.rejects(useSyncStore.getState().login(id, password, true), /Encryption unavailable/)
   assert.equal(useSyncStore.getState().auth.isAuthenticated, false)
   assert.equal(stored.size, 0)
+})
+
+test('completing an auth-key account persists its verified email and exact encrypted password', async (t) => {
+  await useAuthStore.getState().setupMasterPassword(password)
+  const key = useAuthStore.getState().encryptionKey!
+  useAccountStore.setState({
+    accounts: [
+      {
+        id: 'existing-cache-id',
+        name: 'Auth-key account',
+        authKey: await encrypt('Old-token', key),
+        addons: [],
+        lastSync: new Date(),
+        status: 'active',
+      },
+    ],
+  })
+  const exactPassword = ' Synthetic-client-密碼!\n'
+  const login = t.mock.method(stremioClient, 'login', async (email: string, supplied: string) => {
+    assert.equal(email, 'saved@example.invalid')
+    assert.equal(supplied, exactPassword)
+    return { authKey: 'New-token', user: { _id: 'test-user', email } }
+  })
+  t.mock.method(stremioClient, 'getAddonCollection', async () => [])
+  t.mock.method(useSyncStore.getState(), 'syncToRemote', async () => {})
+  await useAccountStore.getState().updateAccount('existing-cache-id', {
+    name: 'Completed account',
+    email: 'saved@example.invalid',
+    password: exactPassword,
+  })
+  const account = useAccountStore.getState().accounts[0]
+  assert.equal(account.id, 'existing-cache-id')
+  assert.equal(account.email, 'saved@example.invalid')
+  assert.equal(await decrypt(account.password!, key), exactPassword)
+  assert.equal(await decrypt(account.authKey, key), 'New-token')
+  assert.equal(
+    JSON.stringify(stored.get('stremio-manager:accounts')).includes(exactPassword),
+    false
+  )
+  assert.deepEqual(stored.get('stremio-manager:accounts'), [account])
+
+  await useAccountStore.getState().updateAccount(account.id, { name: 'Renamed only' })
+  assert.equal(login.mock.callCount(), 1)
+  assert.equal(useAccountStore.getState().accounts[0].password, account.password)
+  assert.equal(useAccountStore.getState().accounts.length, 1)
+})
+
+test('a failed saved-login completion preserves the original account and stored credentials', async (t) => {
+  await useAuthStore.getState().setupMasterPassword(password)
+  const key = useAuthStore.getState().encryptionKey!
+  const account = {
+    id: 'existing-cache-id',
+    name: 'Original',
+    email: 'original@example.invalid',
+    authKey: await encrypt('Old-token', key),
+    password: await encrypt('Old-password', key),
+    addons: [],
+    lastSync: new Date(),
+    status: 'active' as const,
+  }
+  useAccountStore.setState({ accounts: [account] })
+  stored.set('stremio-manager:accounts', [account])
+  t.mock.method(stremioClient, 'login', async () => {
+    throw new Error('Invalid login')
+  })
+  const sync = t.mock.method(useSyncStore.getState(), 'syncToRemote', async () => {})
+  await assert.rejects(
+    useAccountStore.getState().updateAccount(account.id, {
+      name: 'Failed edit',
+      email: 'other@example.invalid',
+      password: 'Wrong-password',
+    }),
+    /Invalid login/
+  )
+  assert.deepEqual(useAccountStore.getState().accounts, [account])
+  assert.deepEqual(stored.get('stremio-manager:accounts'), [account])
+  assert.equal(sync.mock.callCount(), 0)
 })
