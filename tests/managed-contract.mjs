@@ -5,6 +5,8 @@ import { encrypt } from '../server/crypto.js'
 import { migrateManagedSchema, managedMigrations } from '../server/managed/schema.js'
 import { initializeManagedCrypto } from '../server/managed/crypto.js'
 import { createManagedRepository, parseImportBody } from '../server/managed/repository.js'
+import { configuredAddon } from './fixtures/addon-config.mjs'
+const enabledAddon = () => ({ ...configuredAddon(), flags: { enabled: true } })
 
 export const syntheticKey = 'synthetic-managed-test-key'
 export const firstAuth = { owner: 'manager-one', token: 'synthetic-token-one' }
@@ -46,6 +48,123 @@ export async function prepareManagedFixture(db, { migrations = managedMigrations
 export function managedStorageContract(prefix, options, fixture) {
   const check = (name, fn) =>
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
+
+  check(
+    'individual addon setup is encrypted, owner scoped, versioned and retry safe without a group',
+    async ({ db, repository }) => {
+      const id = (await repository.stageImport(firstAuth, parsedAccounts(), randomUUID()))
+        .accounts[0].id
+      const input = { expectedVersion: 1, groupVersion: null, addons: [enabledAddon()] }
+      const key = randomUUID()
+      const saved = await repository.setAccountAddons(firstAuth, id, input, key)
+      assert.equal(saved.account.groupId, null)
+      assert.equal(saved.account.setupSaved, true)
+      assert.equal(saved.jobId, null)
+      assert.deepEqual((await repository.getAccountAddons(firstAuth, id)).addons, input.addons)
+      assert.equal((await repository.setAccountAddons(firstAuth, id, input, key)).replayed, true)
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+      const row = await db.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
+      assert.ok(!JSON.stringify(row).includes('GroupToken'))
+      await assert.rejects(repository.getAccountAddons(secondAuth, id), { code: 'NOT_FOUND' })
+      await assert.rejects(repository.setAccountAddons(firstAuth, id, input, randomUUID()), {
+        code: 'VERSION_CONFLICT',
+      })
+      await assert.rejects(
+        repository.setAccountAddons(firstAuth, id, { ...input, addons: [] }, key),
+        { code: 'EMPTY_PUBLICATION_CONFIRMATION' }
+      )
+    }
+  )
+
+  check(
+    'account customization leaves the group untouched and detaching retains the complete setup',
+    async ({ repository }) => {
+      const id = (await repository.stageImport(firstAuth, parsedAccounts(), randomUUID()))
+        .accounts[0].id
+      const group = (
+        await repository.createGroup(
+          firstAuth,
+          { name: 'Shared group', addons: [enabledAddon()] },
+          randomUUID()
+        )
+      ).group
+      await repository.assignGroup(
+        firstAuth,
+        { groupId: group.id, accounts: [{ id, expectedVersion: 1 }] },
+        randomUUID()
+      )
+      const initial = await repository.getAccountAddons(firstAuth, id)
+      const custom = { ...initial.addons[0], metadata: { customName: 'Only this account' } }
+      const saved = await repository.setAccountAddons(
+        firstAuth,
+        id,
+        { expectedVersion: 2, groupVersion: group.version, addons: [custom] },
+        randomUUID()
+      )
+      assert.equal(saved.addons[0].metadata.customName, 'Only this account')
+      assert.deepEqual((await repository.getGroup(firstAuth, group.id)).draft, group.draft)
+      const detached = await repository.assignGroup(
+        firstAuth,
+        { groupId: null, accounts: [{ id, expectedVersion: saved.account.version }] },
+        randomUUID()
+      )
+      assert.equal(detached.accounts[0].account.groupId, null)
+      assert.equal(detached.accounts[0].account.setupSaved, true)
+      assert.deepEqual((await repository.getAccountAddons(firstAuth, id)).addons, [custom])
+    }
+  )
+
+  check(
+    'account edits reject a changed group, invalid addons and unconfirmed empty setups',
+    async ({ repository }) => {
+      const id = (await repository.stageImport(firstAuth, parsedAccounts(), randomUUID()))
+        .accounts[0].id
+      const group = (
+        await repository.createGroup(
+          firstAuth,
+          { name: 'Shared group', addons: [enabledAddon()] },
+          randomUUID()
+        )
+      ).group
+      await repository.assignGroup(
+        firstAuth,
+        { groupId: group.id, accounts: [{ id, expectedVersion: 1 }] },
+        randomUUID()
+      )
+      await repository.saveGroupDraft(
+        firstAuth,
+        group.id,
+        { expectedVersion: group.version, name: group.name, addons: group.draft, safeMode: false },
+        randomUUID()
+      )
+      await assert.rejects(
+        repository.setAccountAddons(
+          firstAuth,
+          id,
+          { expectedVersion: 2, groupVersion: group.version, addons: group.draft },
+          randomUUID()
+        ),
+        { code: 'VERSION_CONFLICT' }
+      )
+      await assert.rejects(
+        repository.setAccountAddons(
+          firstAuth,
+          id,
+          { expectedVersion: 2, groupVersion: 2, addons: [{}] },
+          randomUUID()
+        ),
+        { code: 'INVALID_ADDON_CONFIG' }
+      )
+      const cleared = await repository.setAccountAddons(
+        firstAuth,
+        id,
+        { expectedVersion: 2, groupVersion: 2, addons: [], allowEmpty: true },
+        randomUUID()
+      )
+      assert.deepEqual(cleared.addons, [])
+      assert.deepEqual((await repository.getAccountAddons(firstAuth, id)).addons, [])
+    }
+  )
 
   check(
     'normal account connection creates one inactive account and preserves exact credentials',

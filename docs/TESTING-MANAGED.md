@@ -1,6 +1,7 @@
 # Accounts: testing candidate
 
-This build supports group publication, personal addons, first-sync review and
+This build supports individual account setups, optional groups, account-specific
+overrides, first-sync review and
 activation, selectable expiry timezones, automatic suspension, renewal, retry,
 login repair, and verified removal. Use the dedicated Stremio test accounts and
 Android devices agreed for acceptance testing.
@@ -27,33 +28,42 @@ the existing identity. New manager passwords require at least 8 characters, and
 registration checks vault setup before reporting success.
 
 For a completely simulated walkthrough, `npm run managed:demo` prints a temporary
-URL and synthetic login. It seeds a group, two staged users and one expired user.
+URL and synthetic login. It seeds an independent account, a group member ready
+for first sync, and an expired member.
 Its provider and manifest transports are synthetic; it cannot contact Stremio.
 Enter `stop` to clean up. The demo expires after 15 minutes.
 
 ## Acceptance walkthrough
 
-1. Refresh and open **Accounts**. Previously added accounts connect automatically;
-   an account already imported appears only once. Use **Add Stremio Account** to
-   add a dedicated test account with its email and password. It appears in this
-   same list with membership, personal-addon and activation controls. There is no
-   export/import step. An older auth-key/OAuth account without a saved password
-   shows **Save email and password** to complete unattended management.
-   **Import from another installation** is only for migrating an external export.
-2. Create a group, add complete configured manifest URLs, and save and publish its
-   draft. Select users in the inventory and assign the published group. Use
-   **Personal addons** for account-specific additions and disabled preferences.
+1. Refresh and open **Accounts**. Previously added accounts connect automatically
+   and imported matches appear only once. Use **Add account** for a dedicated
+   Stremio test login, then **Open account**. An imported server-only account opens
+   the same detail screen. The account list contains summaries, search and filters;
+   groups and sync settings have their own screens.
+2. Leave **Group** set to **No group — individual setup**. On **Addons**, confirm
+   the installed addon cards appear. Try Configure, Customize, Catalogs, Reorder,
+   enable/disable, Library and Install addon. Changes form a draft until **Save
+   changes**. Saving the initial setup does not write to Stremio before first sync.
+   Navigation warns before discarding edits. An older auth-key/OAuth account can
+   still open its manual addon controls; **Save Stremio login** enables unattended
+   sync, groups and expiry.
 3. Open **Membership**. New dated memberships default to `America/New_York`.
    Select or type another IANA timezone, enter its local cutoff and save. Reopen
    to confirm the chosen zone. Nonexistent clock-change times are rejected;
    repeated times require an explicit occurrence. Lifetime is a separate choice.
-4. Open **Activate / preview**. Review the effective addon list and protection
-   setting, then activate. Resume managed sync. Open **Sync / manage** and wait for
-   **Verified**. Check the same Stremio login on Android, including addon order,
-   custom names/catalogs and protected/default entries.
-5. Publish a group change and verify the active member receives it. Confirm its
-   personal addons and intentionally disabled entries are preserved. Pause and
-   resume sync to check that pending work waits.
+4. Open **Sync & access**, choose **Preview first sync**, review the addon list,
+   confirm it and choose **Start sync**. No group is required. If paused, open
+   **Accounts → ⋯ → Sync settings** and resume sync. Wait for **verified** in
+   **Sync & access**, then check the same Stremio login on Android, including
+   order, names, catalogs and protected/default entries.
+5. On **Groups**, create a group, add addons, save its draft, preview and publish.
+   Use the account's **Group** tab to join it, or **Assign group** on Accounts for
+   a selection. Open one member and customize an addon: the other members and the
+   shared group must remain unchanged. Publish another group change; untouched
+   addons follow it while that account's customizations remain. **Use group
+   version** resets an individual addon override. Leave the group and confirm the
+   complete saved setup is retained for independent management. Pause and resume
+   from Sync settings to check that changes wait while paused.
 6. Set one account's expiry a few minutes ahead, in the chosen timezone. After the
    cutoff, check **Expired accounts**, the verified suspension status, and Android.
    Saved addon configuration and former group assignment must remain available.
@@ -62,7 +72,8 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    replaced.
 7. Renew with a future cutoff or lifetime. Verify the current group and personal
    setup returns while intentionally disabled addons stay off.
-8. On a disposable user, select **Clear addons and remove user**. The user should
+8. On a disposable account, select **Sync & access → Remove this account → Clear
+   addons and remove account**. The account should
    disappear only after an empty collection is read back from Stremio. A failure
    retains its credentials and offboarding status for retry. A removed provider
    identity remains reserved to block writes from stale legacy state. Refresh the
@@ -70,6 +81,10 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
 9. Restart this test instance and confirm accounts, timezones and status survive.
    Check the last encrypted-backup timestamp. For invalid sessions, **Repair saved
    login** verifies the password and the enrolled identity before saving it.
+
+**Accounts → ⋯ → Import accounts** is for migrating an export from another
+installation. It retains the credential preview and duplicate/conflict checks;
+ordinary account creation needs no export/import step.
 
 Expiry changes the active addon collection. Android caches and playing streams
 must be checked on the device; server verification does not assert that playback

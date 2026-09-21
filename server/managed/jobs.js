@@ -320,8 +320,8 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
         const { job, account } = await leased(tx, claim, timestamp)
         await ensureUnpaused(tx, account.owner_id)
         if (!matchesPolicy(job, account, timestamp)) throw new ManagedError('VERSION_CONFLICT')
-        // Active setup must have a group; an expired account can still be disabled.
-        if (job.target === 'active' && !account.group_id) throw new ManagedError('INVALID_STATE')
+        if (job.target === 'active' && !account.group_id && !account.addons_initialized)
+          throw new ManagedError('INVALID_STATE')
         const plan = executionPlan === undefined ? null : checkedExecutionPlan(executionPlan)
         if (plan) await checkPolicyStamp(tx, job, account, plan.stamp)
         const digest = collectionDigest(beforeCollection, account)
@@ -382,7 +382,8 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
         if (!equalSecret(collectionDigest(expected, account), collectionDigest(observed, account)))
           throw new ManagedError('INVALID_STATE')
         if (!matchesPolicy(job, account, timestamp)) return supersede(tx, job, account, timestamp)
-        if (job.target === 'active' && !account.group_id) throw new ManagedError('INVALID_STATE')
+        if (job.target === 'active' && !account.group_id && !account.addons_initialized)
+          throw new ManagedError('INVALID_STATE')
         // Suspension/offboarding must verify an empty *active* provider collection.
         if (job.target !== 'active' && observed.length !== 0)
           throw new ManagedError('INVALID_STATE')

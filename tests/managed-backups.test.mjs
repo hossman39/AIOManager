@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { buildServer } from '../server/app.js'
+import { configuredAddon } from './fixtures/addon-config.mjs'
 
 test('daily encrypted snapshots restore credentials, selected timezone, and key material with all writes paused', async () => {
   const directory = await fs.mkdtemp(path.join(tmpdir(), 'aiomanager-backup-test-'))
@@ -47,6 +48,34 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
       { expectedVersion: 1, mode: 'term', local: '2027-02-03T12:30', timezone: 'Europe/Paris' },
       randomUUID()
     )
+    const addon = { ...configuredAddon(), flags: { enabled: true, protected: false } }
+    const group = (
+      await s.repository.createGroup(
+        firstAuth,
+        { name: 'Backup group', addons: [addon], safeMode: null },
+        randomUUID()
+      )
+    ).group
+    const assigned = await s.repository.assignGroup(
+      firstAuth,
+      { groupId: group.id, accounts: [{ id, expectedVersion: 2 }] },
+      randomUUID()
+    )
+    const custom = {
+      ...addon,
+      metadata: { ...addon.metadata, customName: 'Private account override' },
+    }
+    await s.repository.setAccountAddons(
+      firstAuth,
+      id,
+      {
+        expectedVersion: assigned.accounts[0].account.version,
+        groupVersion: group.version,
+        addons: [custom],
+        allowEmpty: false,
+      },
+      randomUUID()
+    )
     const keys = { primary: syntheticKey, candidates: [syntheticKey, 'synthetic-retired-key'] }
     scheduler = createManagedBackupScheduler({ db: source, keys, directory, now: s.now })
     const backup = await scheduler.run()
@@ -55,6 +84,7 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     const bytes = await fs.readFile(backup.filename)
     assert.equal(bytes.includes(Buffer.from('Person@example.invalid')), false)
     assert.equal(bytes.includes(Buffer.from(syntheticKey)), false)
+    assert.equal(bytes.includes(Buffer.from('Private account override')), false)
     await restored.exec(
       'CREATE TABLE kv_store (key TEXT PRIMARY KEY, value TEXT, password TEXT, updated_at BIGINT)'
     )
@@ -85,6 +115,10 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     const account = await repository.getAccount(firstAuth, id)
     assert.equal(account.expiry.timezone, 'Europe/Paris')
     assert.equal(account.email, 'Person@example.invalid')
+    assert.equal(account.setupSaved, true)
+    const setup = await repository.getAccountAddons(firstAuth, id)
+    assert.deepEqual(setup.addons, [custom])
+    assert.deepEqual(setup.overrides.addons, [custom])
     assert.equal(
       (await repository.connectAccounts(firstAuth, cached)).connections[0].account.id,
       id

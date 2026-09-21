@@ -1,6 +1,8 @@
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { checkedCollection } from './projection.js'
+import { readAccountSetup } from './account-setup.js'
+import { emptyAccountOverrides } from '../../shared/account-addons.js'
 
 export const providerIdentityKey = (crypto, id) =>
   crypto.fingerprint(id, {
@@ -28,52 +30,28 @@ export async function readExecutionPolicy(tx, account, crypto, target) {
   let group = [],
     personal = [],
     safeMode = true,
-    revision = null
+    revision = null,
+    accountOverrides = emptyAccountOverrides(),
+    individual = !account.group_id
   if (target === 'active') {
-    if (!account.group_id) throw new ManagedError('INVALID_STATE')
-    const row = await tx.get('SELECT * FROM managed_groups WHERE owner_id = $1 AND id = $2', [
-      account.owner_id,
-      account.group_id,
-    ])
-    if (!row || row.archived || row.published_revision === null)
-      throw new ManagedError('INVALID_STATE')
-    revision = row.published_revision
-    const published = await tx.get(
-      'SELECT * FROM managed_group_revisions WHERE owner_id = $1 AND group_id = $2 AND revision = $3',
-      [account.owner_id, row.id, revision]
-    )
-    if (!published) throw new ManagedError('DATA_UNREADABLE')
-    group = checkedCollection(
-      crypto.open(published.config_enc, {
-        owner: account.owner_id,
-        id: row.id,
-        purpose: `group-revision:${revision}`,
-      })
-    )
-    if (
-      !equalSecret(
-        published.payload_digest,
-        crypto.fingerprint(group, {
-          owner: account.owner_id,
-          id: row.id,
-          purpose: 'group-payload',
-        })
-      ) ||
-      (!group.some((addon) => addon.flags?.enabled !== false) && published.explicit_empty !== 1)
-    )
-      throw new ManagedError('DATA_UNREADABLE')
-    personal = checkedCollection(crypto.open(account.personal_enc, binding('personal-addons')))
-    const owner = await tx.get('SELECT safe_mode FROM managed_owners WHERE owner_id = $1', [
-      account.owner_id,
-    ])
-    if (!owner) throw new ManagedError('DATA_UNREADABLE')
-    safeMode = (account.safe_mode ?? row.safe_mode ?? owner.safe_mode) === 1
+    if (individual && !account.addons_initialized) throw new ManagedError('INVALID_STATE')
+    const setup = await readAccountSetup(tx, account, crypto, { publishedOnly: true })
+    ;({ group, personal, safeMode, revision, accountOverrides } = setup)
   }
   const stamp = crypto.fingerprint(
-    { provider, group, personal, safeMode, revision, groupId: account.group_id },
+    {
+      provider,
+      group,
+      personal,
+      safeMode,
+      revision,
+      groupId: account.group_id,
+      accountOverrides,
+      individual,
+    },
     binding('execution-policy')
   )
-  return { provider, group, personal, saved, safeMode, target, stamp }
+  return { provider, group, personal, saved, safeMode, target, stamp, accountOverrides, individual }
 }
 
 export function checkedExecutionPlan(plan) {

@@ -9,6 +9,7 @@ import { createManagedJobStore, currentAccountTarget } from './jobs.js'
 import { createManagedGroupRepository } from './groups.js'
 import { createManagedOperations } from './operations.js'
 import { createManagedConnections } from './connections.js'
+import { createAccountAddonRepository } from './account-addons.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
@@ -127,6 +128,7 @@ export function createManagedRepository({
       name: credentials.name,
       state: row.state,
       groupId: row.group_id,
+      setupSaved: row.addons_initialized === 1 || row.group_id !== null,
       membershipType: row.lifetime === 1 ? 'lifetime' : row.expiry_at === null ? 'unset' : 'term',
       version: row.record_version,
       policyVersion: row.policy_version,
@@ -153,6 +155,16 @@ export function createManagedRepository({
 
   return Object.freeze({
     ...createManagedConnections({ crypto, ownerTransaction, publicAccount }),
+    ...createAccountAddonRepository({
+      db,
+      crypto,
+      authorize,
+      ownerTransaction,
+      idempotent,
+      publicAccount,
+      jobs,
+      runtime,
+    }),
     ...createManagedOperations({
       db,
       crypto,

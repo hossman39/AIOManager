@@ -218,6 +218,12 @@ CREATE INDEX managed_accounts_suspension_check ON managed_accounts (suspension_c
 );
 CREATE INDEX managed_account_links_email ON managed_account_links (owner_id, email_key);`,
   }),
+  Object.freeze({
+    version: 7,
+    name: 'individual-account-addons',
+    sql: `ALTER TABLE managed_accounts ADD COLUMN addon_overrides_enc TEXT;
+ALTER TABLE managed_accounts ADD COLUMN addons_initialized INTEGER NOT NULL DEFAULT 0 CHECK (addons_initialized IN (0, 1));`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

@@ -165,7 +165,7 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
       </h4>
       <p className="text-sm text-muted-foreground">
         {account.state === 'staged'
-          ? 'This user stays staged. Saving a membership does not activate the account or change addons.'
+          ? 'Your Stremio addons stay unchanged until you start sync.'
           : 'Changes apply through managed sync. Expiry disables addons but keeps their saved setup for renewal.'}{' '}
         Lifetime has no automatic cutoff. An unset expiry is not a lifetime membership.
       </p>

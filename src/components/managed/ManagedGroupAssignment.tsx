@@ -37,8 +37,8 @@ export function ManagedGroupAssignment({
   return (
     <div className="space-y-3 rounded border p-3 text-sm" aria-label="Bulk group assignment">
       <p>
-        {accounts.length} loaded users selected. Assignment is all-or-nothing and does not activate
-        staged users.
+        {accounts.length} accounts selected. The group supplies shared addon settings; account-only
+        addons stay. Accounts that have not started sync stay inactive.
       </p>
       {accounts.length > 200 && <p role="alert">Select at most 200 users per assignment.</p>}
       <label className="block space-y-1" htmlFor="managed-assignment-group">
@@ -73,6 +73,7 @@ export function ManagedGroupAssignment({
           onClick={() =>
             void mutation.submit({
               groupId,
+              useGroupAddons: true,
               accounts: accounts.map((account) => ({
                 id: account.id,
                 expectedVersion: account.version,
@@ -80,7 +81,7 @@ export function ManagedGroupAssignment({
             })
           }
         >
-          Assign selected users
+          Assign selected accounts
         </Button>
         {mutation.uncertain && (
           <Button type="button" disabled={mutation.busy} onClick={() => void mutation.retry()}>

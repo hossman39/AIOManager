@@ -11,7 +11,7 @@ import {
   type ManagedDeployment,
 } from '@/api/managed'
 import { AddonDraftError, checkedAddonDraft } from '@/lib/managed/addon-draft'
-import { ManagedAddonEditor } from './ManagedAddonEditor'
+import { ManagedAddonCards } from './ManagedAddonCards'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
 
 type Api = ReturnType<typeof createManagedApi>
@@ -85,7 +85,7 @@ function GroupEditor({
   )
   const locked =
     externalBusy || mutation.busy || mutation.uncertain || mutation.stale || resolving || reading
-  useUnsavedWarning(dirty || mutation.busy || mutation.uncertain)
+  useUnsavedWarning(dirty || pendingUrl || resolving || mutation.busy || mutation.uncertain)
   useEffect(() => {
     alive.current = true
     heading.current?.focus()
@@ -222,7 +222,7 @@ function GroupEditor({
           including protected entries.
         </p>
       </fieldset>
-      <ManagedAddonEditor
+      <ManagedAddonCards
         key={editorEpoch}
         addons={addons}
         api={api}
@@ -311,8 +311,8 @@ function GroupEditor({
             account read during execution.
           </p>
           <p className="text-muted-foreground">
-            Preview expires {new Date(preview.expiresAt).toLocaleTimeString()}. This build does not
-            execute provider writes.
+            Preview expires {new Date(preview.expiresAt).toLocaleTimeString()}. Published changes
+            sync to active accounts when sync is running.
           </p>
           {preview.unchanged ? (
             <p role="status">This addon setup is already published. No new rollout is needed.</p>
@@ -439,6 +439,7 @@ export function ManagedGroupsPanel({
   const [groups, setGroups] = useState<ManagedGroupSummary[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [selected, setSelected] = useState<ManagedGroup | null>(null)
+  const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(false)
   const [selectionLocked, setSelectionLocked] = useState(false)
   const [error, setError] = useState('')
@@ -553,6 +554,7 @@ export function ManagedGroupsPanel({
     abort.current?.abort()
     setLoading(false)
     setSelected(result.group)
+    setCreating(false)
     const { draft, ...summary } = result.group
     void draft
     setGroups((previous) => {
@@ -572,13 +574,10 @@ export function ManagedGroupsPanel({
   }
 
   return (
-    <section
-      className="min-w-0 space-y-4 rounded-xl border bg-card p-5"
-      aria-labelledby="managed-groups-heading"
-    >
+    <section className="min-w-0 space-y-5" aria-labelledby="managed-groups-heading">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 id="managed-groups-heading" className="text-lg font-semibold">
-          Addon groups
+          {selected ? selected.name : 'Your groups'}
         </h3>
         <Button
           type="button"
@@ -589,10 +588,6 @@ export function ManagedGroupsPanel({
           Refresh groups
         </Button>
       </div>
-      <p className="text-sm text-muted-foreground">
-        Create a reusable addon setup, save a draft, then publish one revision for its eligible
-        members. Activated users sync when managed sync is running.
-      </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -603,27 +598,33 @@ export function ManagedGroupsPanel({
           {notice}
         </p>
       )}
-      {!selected && (
+      {!selected && !creating && <Button onClick={() => setCreating(true)}>New group</Button>}
+      {!selected && creating && (
         <NewGroup api={api} onCreated={(group) => saved({ group })} onLock={setSelectionLocked} />
       )}
-      <div className="flex flex-wrap gap-2" aria-busy={loading}>
-        {groups.map((group) => (
-          <Button
-            type="button"
-            variant={selected?.id === group.id ? 'secondary' : 'outline'}
-            key={group.id}
-            disabled={loading || selectionLocked}
-            onClick={() => void open(group.id)}
-            className="h-auto max-w-full whitespace-normal break-words text-left"
-          >
-            {group.name} · {group.addonCount} addons ·{' '}
-            {group.publishedRevision === null
-              ? 'draft only'
-              : `revision ${group.publishedRevision}`}
-          </Button>
-        ))}
-      </div>
-      {next && (
+      {!selected && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-busy={loading}>
+          {groups.map((group) => (
+            <Button
+              type="button"
+              variant="outline"
+              key={group.id}
+              disabled={loading || selectionLocked}
+              onClick={() => void open(group.id)}
+              className="h-auto min-h-28 max-w-full flex-col items-start gap-2 whitespace-normal break-words rounded-xl bg-card p-5 text-left"
+            >
+              <span className="text-base font-semibold">{group.name}</span>
+              <span className="text-sm font-normal text-muted-foreground">
+                {group.addonCount} addons ·{' '}
+                {group.publishedRevision === null
+                  ? 'draft only'
+                  : `published revision ${group.publishedRevision}`}
+              </span>
+            </Button>
+          ))}
+        </div>
+      )}
+      {next && !selected && (
         <Button
           type="button"
           variant="outline"

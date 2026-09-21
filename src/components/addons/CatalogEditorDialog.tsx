@@ -106,6 +106,8 @@ interface CatalogEditorDialogProps {
     onOpenChange: (open: boolean) => void
     addon: AddonDescriptor
     onSave: (updatedAddon: AddonDescriptor) => Promise<void>
+    loadOriginal?: () => Promise<AddonDescriptor>
+    draftOnly?: boolean
 }
 
 export function CatalogEditorDialog({
@@ -113,6 +115,8 @@ export function CatalogEditorDialog({
     onOpenChange,
     addon,
     onSave,
+    loadOriginal,
+    draftOnly = false,
 }: CatalogEditorDialogProps) {
     const [catalogs, setCatalogs] = useState<(Catalog & { _tempId: string })[]>([])
     const [saving, setSaving] = useState(false)
@@ -221,7 +225,7 @@ export function CatalogEditorDialog({
 
             toast({
                 title: 'Catalogs Updated',
-                description: `Changes saved for ${addon.manifest.name}`,
+                description: draftOnly ? 'Draft updated. Save the setup to apply.' : `Changes saved for ${addon.manifest.name}`,
             })
 
             onOpenChange(false)
@@ -239,8 +243,7 @@ export function CatalogEditorDialog({
     const handleReset = async () => {
         setSaving(true)
         try {
-            const { fetchAddonManifest } = await import('@/api/addons')
-            const fresh = await fetchAddonManifest(addon.transportUrl)
+            const fresh = loadOriginal ? await loadOriginal() : await (await import('@/api/addons')).fetchAddonManifest(addon.transportUrl)
 
             if (fresh.manifest.catalogs) {
                 const freshCatalogs = fresh.manifest.catalogs.map((cat, idx) => ({

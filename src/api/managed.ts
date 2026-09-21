@@ -3,6 +3,7 @@ import { deriveSyncToken } from '@/lib/crypto'
 import type { CredentialUpload } from '@/lib/managed/prepare-import'
 import { parseAddonConfiguration, type ManagedAddon } from '../../shared/addon-config.js'
 import { validMembershipTimezone } from '../../shared/membership-expiry.js'
+import { parseAccountOverrides } from '../../shared/account-addons.js'
 
 const issueSchema = z.object({
   row: z.number().int().positive(),
@@ -46,6 +47,7 @@ const accountSchema = z
     name: z.string(),
     state: z.enum(['staged', 'active', 'offboarding']),
     groupId: z.string().nullable(),
+    setupSaved: z.boolean().optional(),
     membershipType: z.enum(['unset', 'term', 'lifetime']),
     version: z.number().int().positive(),
     policyVersion: z.number().int().positive(),
@@ -159,6 +161,28 @@ const addonsSchema = z.unknown().transform((value, ctx) => {
   }
   return parsed.addons
 })
+const accountAddonsSchema = z.object({
+  account: accountSchema,
+  addons: addonsSchema,
+  groupAddons: addonsSchema,
+  groupVersion: z.number().int().positive().nullable(),
+  groupName: z.string().nullable(),
+  overrides: z.unknown().transform((value, ctx) => {
+    const parsed = parseAccountOverrides(value)
+    if (!parsed.ok) {
+      ctx.addIssue({ code: 'custom', message: 'Invalid account overrides' })
+      return z.NEVER
+    }
+    return parsed.overrides
+  }),
+  source: z.enum(['saved', 'stremio']),
+  installed: addonsSchema.nullable(),
+})
+const accountAddonsResultSchema = accountAddonsSchema.extend({
+  jobId: z.uuid().nullable(),
+  replayed: z.boolean(),
+})
+export type ManagedAccountAddons = z.infer<typeof accountAddonsSchema>
 const groupSummarySchema = z.object({
   id: z.uuid(),
   name: z.string().min(1).max(120),
@@ -546,6 +570,28 @@ export function createManagedApi({
       }),
     personalAddons: (id: string, signal?: AbortSignal) =>
       request(`/accounts/${encodeURIComponent(id)}/personal-addons`, personalSchema, { signal }),
+    accountAddons: (id: string, signal?: AbortSignal, live = false) =>
+      request(
+        `/accounts/${encodeURIComponent(id)}/addons${live ? '?live=true' : ''}`,
+        accountAddonsSchema,
+        { signal }
+      ),
+    setAccountAddons: (
+      id: string,
+      body: {
+        expectedVersion: number
+        groupVersion: number | null
+        addons: ManagedAddon[]
+        allowEmpty: boolean
+      },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/accounts/${encodeURIComponent(id)}/addons`, accountAddonsResultSchema, {
+        body,
+        key,
+        signal,
+      }),
     setPersonalAddons: (
       id: string,
       body: { addons: ManagedAddon[]; expectedVersion: number },
@@ -558,7 +604,11 @@ export function createManagedApi({
         signal,
       }),
     assignGroup: (
-      body: { groupId: string | null; accounts: { id: string; expectedVersion: number }[] },
+      body: {
+        groupId: string | null
+        useGroupAddons?: boolean
+        accounts: { id: string; expectedVersion: number }[]
+      },
       key: string,
       signal?: AbortSignal
     ) => request('/accounts/assign-group', assignmentResultSchema, { body, key, signal }),

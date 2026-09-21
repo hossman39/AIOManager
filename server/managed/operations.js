@@ -5,6 +5,7 @@ import { ManagedError } from './errors.js'
 import { providerIdentityKey, readExecutionPolicy } from './execution.js'
 import { currentAccountTarget } from './entitlement.js'
 import { projectManagedCollection } from './projection.js'
+import { addonUrlIdentity } from '../../shared/addon-config.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const versionInput = z.strictObject({ expectedVersion: z.number().int().positive() })
@@ -90,7 +91,7 @@ export function createManagedOperations({
       provider_key: providerIdentityKey(crypto, provider.id),
       provider_enc: crypto.seal(provider, binding(row, 'provider-session')),
     }
-    // Require a published, compatible group even when initially expired.
+    // A chosen group must be published; individual accounts use their saved setup.
     const policy = await readExecutionPolicy(tx, prepared, crypto, 'active')
     return { prepared, policy: { ...policy, target: currentAccountTarget(prepared, now()) } }
   }
@@ -174,9 +175,17 @@ export function createManagedOperations({
         await unbound(row, prepared.provider_key)
         if (typeof validateManifests !== 'function')
           throw new ManagedError('PUBLICATION_UNAVAILABLE')
-        if ((await validateManifests([...policy.group, ...policy.personal])) !== true)
-          throw new ManagedError('MANIFEST_UNAVAILABLE')
         const remote = await runtime.provider.getCollection(provider)
+        // Existing provider descriptors (including Local Files) do not require a
+        // backend fetch of their URL. New account URLs are still validated.
+        const observed = new Map(
+          remote.map((addon) => [addonUrlIdentity(addon.transportUrl), addon.manifest.id])
+        )
+        const unobserved = [...policy.personal, ...policy.accountOverrides.addons].filter(
+          (addon) => observed.get(addonUrlIdentity(addon.transportUrl)) !== addon.manifest.id
+        )
+        if ((await validateManifests([...policy.group, ...unobserved])) !== true)
+          throw new ManagedError('MANIFEST_UNAVAILABLE')
         const plan = projectManagedCollection({ ...policy, remote })
         const expected = runtime.provider.normalizeCollection?.(plan.expected) ?? plan.expected
         const expiresAt = now() + 5 * 60_000

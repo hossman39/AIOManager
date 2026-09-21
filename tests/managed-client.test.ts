@@ -278,6 +278,74 @@ const groupPublication = {
   unchanged: false,
   replayed: false,
 }
+
+test('account addon client preserves the full setup, versions, and idempotency key without exposing credentials', async () => {
+  const view = {
+    account: { ...publicAccount, setupSaved: true, password: 'private-server-password' },
+    addons: groupDraft.addons,
+    groupAddons: [],
+    groupVersion: null,
+    groupName: null,
+    overrides: { addons: [], removed: [], order: [] },
+    source: 'saved',
+    installed: groupDraft.addons,
+  }
+  const change = {
+    expectedVersion: 2,
+    groupVersion: null,
+    addons: groupDraft.addons,
+    allowEmpty: true,
+  }
+  let calls = 0
+  const api = createManagedApi({
+    ...auth,
+    fetch: async (url, options) => {
+      calls++
+      assert.equal(
+        new Headers(options?.headers).get('x-sync-password'),
+        await deriveSyncToken(auth.password)
+      )
+      assert.equal(options?.redirect, 'error')
+      if (calls === 1) {
+        assert.equal(url, `/api/managed/accounts/${publicAccount.id}/addons?live=true`)
+        return reply(view)
+      }
+      assert.equal(url, `/api/managed/accounts/${publicAccount.id}/addons`)
+      assert.equal(options?.method, 'POST')
+      assert.equal(new Headers(options?.headers).get('idempotency-key'), 'same-account-save')
+      assert.deepEqual(JSON.parse(options?.body as string), change)
+      return reply({ ...view, jobId: null, replayed: false })
+    },
+  })
+  const initial = await api.accountAddons(publicAccount.id, undefined, true)
+  assert.deepEqual(initial.addons, groupDraft.addons)
+  assert.ok(!JSON.stringify(initial).includes('private-server-password'))
+  const saved = await api.setAccountAddons(publicAccount.id, change, 'same-account-save')
+  assert.equal(saved.account.setupSaved, true)
+  assert.equal(calls, 2)
+})
+
+test('account addon client rejects malformed configuration and override responses', async () => {
+  const valid = {
+    account: publicAccount,
+    addons: groupDraft.addons,
+    groupAddons: [],
+    groupVersion: null,
+    groupName: null,
+    overrides: { addons: [], removed: [], order: [] },
+    source: 'saved',
+    installed: null,
+  }
+  for (const invalid of [
+    { ...valid, addons: [{ manifest: {} }] },
+    { ...valid, overrides: { addons: [], removed: ['not a URL'], order: [] } },
+    { ...valid, groupVersion: -1 },
+    { ...valid, source: 'unknown' },
+  ]) {
+    const api = createManagedApi({ ...auth, fetch: async () => reply(invalid) })
+    await assert.rejects(api.accountAddons(publicAccount.id), { code: 'INVALID_RESPONSE' })
+  }
+})
 const publicDeployment = {
   id: deploymentId,
   groupId,

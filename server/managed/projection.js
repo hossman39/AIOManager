@@ -4,6 +4,7 @@ import {
   parseAddonConfiguration,
 } from '../../shared/addon-config.js'
 import { ManagedError } from './errors.js'
+import { applyAccountOverrides } from '../../shared/account-addons.js'
 
 export function checkedCollection(value) {
   const result = parseAddonConfiguration(value)
@@ -79,7 +80,16 @@ export function providerCollection(configuration) {
     })
 }
 
-export function projectManagedCollection({ group, personal, saved, remote, safeMode, target }) {
+export function projectManagedCollection({
+  group,
+  personal,
+  saved,
+  remote,
+  safeMode,
+  target,
+  accountOverrides,
+  individual = false,
+}) {
   const retained = checkedCollection(saved)
   const observed = checkedCollection(remote)
   const savedByUrl = new Map(retained.map((addon) => [identity(addon), addon]))
@@ -93,10 +103,12 @@ export function projectManagedCollection({ group, personal, saved, remote, safeM
     return { configuration, expected: [] }
   }
   if (target !== 'active' || typeof safeMode !== 'boolean') throw new ManagedError('INVALID_STATE')
-  const combined = combineAddonLayers(group, personal)
+  const combined = accountOverrides
+    ? applyAccountOverrides(group, personal, accountOverrides)
+    : combineAddonLayers(group, personal)
   if (!combined.ok) throw new ManagedError(combined.code)
   let configuration = combined.addons
-  if (safeMode) {
+  if (safeMode && !individual) {
     // Fresh remote order anchors protected/default entries. A saved descriptor
     // keeps its clean manifest and disabled preference across expiry and retries.
     const baseline = observed.map((addon) => {
@@ -118,8 +130,16 @@ export function projectManagedCollection({ group, personal, saved, remote, safeM
     const remoteUrls = new Set(observed.map(identity))
     baseline.push(...retained.filter((addon) => !remoteUrls.has(identity(addon))))
     const desiredByUrl = new Map(configuration.map((addon) => [identity(addon), addon]))
+    const removed = new Set(accountOverrides?.removed ?? [])
+    const edited = new Set(
+      [...(accountOverrides?.addons ?? []), ...(accountOverrides ? personal : [])].map(identity)
+    )
     const anchors = baseline.flatMap((addon, index) =>
-      protectedAddon(addon) ? [{ addon, index }] : []
+      protectedAddon(addon) &&
+      !removed.has(identity(addon)) &&
+      (!individual || desiredByUrl.has(identity(addon)))
+        ? [{ addon, index }]
+        : []
     )
     const protectedUrls = new Set(anchors.map(({ addon }) => identity(addon)))
     configuration = configuration.filter((addon) => !protectedUrls.has(identity(addon)))
@@ -127,14 +147,24 @@ export function projectManagedCollection({ group, personal, saved, remote, safeM
       const desired = desiredByUrl.get(identity(addon))
       // Enabling/disabling remains editable even when metadata is protected.
       const kept =
-        desired?.flags?.enabled === undefined
-          ? addon
-          : {
-              ...addon,
-              flags: { ...addon.flags, enabled: desired.flags.enabled },
-            }
+        desired && (individual || edited.has(identity(addon)))
+          ? desired
+          : desired?.flags?.enabled === undefined
+            ? addon
+            : {
+                ...addon,
+                flags: { ...addon.flags, enabled: desired.flags.enabled },
+              }
       configuration.splice(Math.min(index, configuration.length), 0, kept)
     }
+  }
+  // A deliberate per-account reorder also applies to protected entries. Safety
+  // preserves descriptors; it must not silently undo the owner's chosen order.
+  if (accountOverrides?.order.length) {
+    const positions = new Map(accountOverrides.order.map((url, index) => [url, index]))
+    configuration.sort(
+      (a, b) => (positions.get(identity(a)) ?? Infinity) - (positions.get(identity(b)) ?? Infinity)
+    )
   }
   configuration = checkedCollection(configuration)
   return { configuration, expected: providerCollection(configuration) }

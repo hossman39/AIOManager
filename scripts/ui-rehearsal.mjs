@@ -40,6 +40,7 @@ try {
     Array.from({ length: 3 }, (_, i) => ({
       email: `group-user-${i + 1}@example.invalid`,
       password: 'Synthetic-client-only!',
+      addons: [{ ...configuredAddon(), flags: { enabled: true, protected: false } }],
     }))
   )
   const manifestService = createManagedManifestService({
@@ -132,6 +133,9 @@ try {
         receipt: preview.receipt,
       })
       for (const [index, row] of staged.json().accounts.entries()) {
+        // Leave the first account independent so the demo exercises first-use
+        // addon management without requiring a group.
+        if (index === 0) continue
         await post('/accounts/assign-group', {
           groupId: group.id,
           accounts: [{ id: row.id, expectedVersion: 1 }],

@@ -77,7 +77,7 @@ export function ManagedAccountOperations({
         result.removedAt
           ? 'Stremio cleanup verified. Local account removed.'
           : result.account?.state === 'staged'
-            ? 'Login verified. This user remains staged.'
+            ? 'Login verified. Sync has not started for this account.'
             : 'Request saved. Waiting for verified sync.'
       )
       if (result.account) updated.current(result.account)
@@ -159,7 +159,7 @@ export function ManagedAccountOperations({
         tabIndex={-1}
         className="break-all font-semibold"
       >
-        Manage {account.email}
+        Sync & access
       </h4>
       {paused && (
         <p className="text-sm">
@@ -191,7 +191,7 @@ export function ManagedAccountOperations({
       {current.state === 'staged' ? (
         <div className="space-y-3">
           <p className="text-sm">
-            Assign a published group and save a dated or lifetime membership first. Preview signs in
+            Save this account’s addons (or choose a published group) and set a membership first. Preview signs in
             to the existing Stremio account and reads its addons.
           </p>
           <label className="block space-y-1 text-sm">
@@ -213,7 +213,7 @@ export function ManagedAccountOperations({
           </label>
           <Button
             variant="outline"
-            disabled={locked || !enabled || !current.groupId || current.membershipType === 'unset'}
+            disabled={locked || !enabled || (!current.groupId && !current.setupSaved) || current.membershipType === 'unset'}
             onClick={() => void prepare()}
           >
             {reading ? 'Preparing preview…' : 'Preview first sync'}
@@ -269,7 +269,7 @@ export function ManagedAccountOperations({
                   })
                 }
               >
-                Activate and queue first sync
+                Start sync
               </Button>
             </div>
           )}
@@ -287,7 +287,7 @@ export function ManagedAccountOperations({
           </Button>
           {current.state === 'active' && (
             <details className="rounded border p-3 text-sm">
-              <summary className="cursor-pointer font-medium">Remove this managed user</summary>
+              <summary className="cursor-pointer font-medium">Remove this account</summary>
               <p className="my-3">
                 Removal disables all remote addons. The local account and credentials are deleted
                 only after Stremio confirms the collection is empty. Failed cleanup stays visible
@@ -312,7 +312,7 @@ export function ManagedAccountOperations({
                   })
                 }
               >
-                Clear addons and remove user
+                Clear addons and remove account
               </Button>
             </details>
           )}

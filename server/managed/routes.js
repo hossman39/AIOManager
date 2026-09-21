@@ -191,6 +191,19 @@ export async function registerManagedRoutes(app, repository, manifestService) {
       routes.get('/accounts/:id/personal-addons', (request) =>
         repository.getPersonalAddons(request.managedAuth, request.params.id)
       )
+      routes.get('/accounts/:id/addons', (request) =>
+        repository.getAccountAddons(request.managedAuth, request.params.id, {
+          live: request.query.live === 'true',
+        })
+      )
+      routes.post('/accounts/:id/addons', { bodyLimit: 3 * 1024 * 1024 }, (request) =>
+        repository.setAccountAddons(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
       routes.post(
         '/accounts/:id/personal-addons',
         { bodyLimit: MAX_ADDON_CONFIG_BYTES + 4096 },

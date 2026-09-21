@@ -148,6 +148,8 @@ export function managedWorkerContract(prefix, options, fixture) {
           expiry_zone: 'America/New_York',
           expiry_zone_offset: null,
           suspension_check_at: null,
+          addon_overrides_enc: null,
+          addons_initialized: 0,
         }))
       )
       assert.equal((await s.db.get('SELECT execution_enc FROM managed_jobs')).execution_enc, null)

@@ -82,6 +82,8 @@ export function managedMembershipContract(prefix, options, fixture) {
           expiry_zone: 'America/New_York',
           expiry_zone_offset: null,
           suspension_check_at: null,
+          addon_overrides_enc: null,
+          addons_initialized: 0,
         }))
       )
       assert.deepEqual(

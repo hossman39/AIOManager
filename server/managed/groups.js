@@ -9,6 +9,9 @@ import {
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { createGroupPublicationRepository } from './publication.js'
+import { readAccountSetup } from './account-setup.js'
+import { projectManagedCollection } from './projection.js'
+import { emptyAccountOverrides } from '../../shared/account-addons.js'
 
 const version = z.number().int().positive()
 const draftInput = z.strictObject({
@@ -24,6 +27,7 @@ const saveInput = draftInput.extend({ expectedVersion: version })
 const personalInput = z.strictObject({ expectedVersion: version, addons: z.unknown() })
 const assignmentInput = z.strictObject({
   groupId: z.uuid().nullable(),
+  useGroupAddons: z.boolean().optional(),
   accounts: z
     .array(z.strictObject({ id: z.uuid(), expectedVersion: version }))
     .min(1)
@@ -352,14 +356,52 @@ export function createManagedGroupRepository({
             if (!row) throw new ManagedError('NOT_FOUND')
             if (row.record_version !== expected.expectedVersion)
               throw new ManagedError('VERSION_CONFLICT')
-            if (row.state === 'offboarding' || (row.state === 'active' && !destination))
-              throw new ManagedError('INVALID_STATE')
+            if (row.state === 'offboarding') throw new ManagedError('INVALID_STATE')
             if (destination && row.state === 'active' && destination.published_revision === null)
               throw new ManagedError('GROUP_NOT_PUBLISHED')
-            if (destinationGuard) destinationGuard(personal(row))
+            if (destinationGuard && !value.useGroupAddons) destinationGuard(personal(row))
             if (row.group_id === value.groupId) {
               accounts.push({ account: publicAccount(row), jobId: null })
               continue
+            }
+            if (!destination) {
+              const setup = await readAccountSetup(tx, row, crypto)
+              const individual = projectManagedCollection({
+                ...setup,
+                remote: [],
+                target: 'active',
+              }).configuration
+              await tx.run(
+                'UPDATE managed_accounts SET personal_enc = $1, addon_overrides_enc = $2, addons_initialized = 1 WHERE owner_id = $3 AND id = $4',
+                [
+                  crypto.seal(individual, context(owner, row.id, 'personal-addons')),
+                  crypto.seal(
+                    emptyAccountOverrides(),
+                    context(owner, row.id, 'account-addon-overrides')
+                  ),
+                  owner,
+                  row.id,
+                ]
+              )
+            } else if (value.useGroupAddons) {
+              const groupUrls = new Set(
+                destinationAddons.map((addon) => addonUrlIdentity(addon.transportUrl))
+              )
+              const additions = personal(row).filter(
+                (addon) => !groupUrls.has(addonUrlIdentity(addon.transportUrl))
+              )
+              await tx.run(
+                'UPDATE managed_accounts SET personal_enc = $1, addon_overrides_enc = $2 WHERE owner_id = $3 AND id = $4',
+                [
+                  crypto.seal(additions, context(owner, row.id, 'personal-addons')),
+                  crypto.seal(
+                    emptyAccountOverrides(),
+                    context(owner, row.id, 'account-addon-overrides')
+                  ),
+                  owner,
+                  row.id,
+                ]
+              )
             }
             await tx.run(
               'UPDATE managed_accounts SET group_id = $1, record_version = record_version + 1, policy_version = policy_version + 1, updated_at = $2 WHERE owner_id = $3 AND id = $4',

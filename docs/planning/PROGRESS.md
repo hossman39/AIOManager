@@ -6,6 +6,33 @@ been accessed or modified. Branch checkpoints/CI do not authorize production rol
 
 ## Current testing increment
 
+Individual management is restored. Accounts now uses summary cards with an
+**Open account** link; each detail page contains addon cards, membership, an
+optional group, and sync/access controls. Groups and global sync settings are
+separate pages. The oversized inventory editor is replaced, and the header no
+longer covers account titles. This information hierarchy follows the reviewed
+Slicksync Users/Groups pages at the pinned baseline; no reference code was copied.
+
+Migration 7 adds encrypted account overrides and an explicit saved-setup marker.
+An account can preview and activate its own setup without a group. Account edits
+override only matching group entries; untouched entries follow later publications.
+Leaving a group retains the complete saved setup. Explicit account changes can
+customize/reorder protected entries, while expiry still disables everything and
+renewal retains the saved preferences. All provider mutations retain the existing
+version checks, snapshots, write gates, durable jobs and readback verification.
+
+Local validation passes 310 tests, with 114 PostgreSQL contracts reserved for CI,
+plus typecheck, lint and build. Coverage includes the full independent-account HTTP
+lifecycle, optional group joins, isolated overrides, later shared publications,
+detachment, Tokyo expiry/renewal, client request boundaries, additive migrations,
+and encrypted backup/restore of overrides. Browser checks cover individual addon
+editing, manifest installation, catalog changes, protected Cinemeta options,
+reordering, membership, first sync without a group, group joins and publication.
+The local test instance has upgraded to migration 7 with its original accounts
+and key retained; an encrypted SQLite copy was taken before the upgrade.
+
+## Earlier unified inventory checkpoint
+
 Accounts is now the single account workspace. Existing browser accounts connect
 automatically to their server records by owner and email; normal account addition
 uses the same path. Existing managed settings and saved credentials are preserved.

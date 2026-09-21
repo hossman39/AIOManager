@@ -87,7 +87,18 @@ export function createGroupPublicationRepository({
             ? 'offboarding'
             : target
       ]++
-      if (account.state !== 'offboarding') guard(personal(account))
+      if (account.state !== 'offboarding') {
+        const custom = personal(account)
+        // Explicit account setups retain their own version if a later group
+        // publication introduces the same URL. Older passive imports still
+        // require resolving collisions before publication.
+        const shared = new Set(addons.map((addon) => addonUrlIdentity(addon.transportUrl)))
+        guard(
+          account.addons_initialized
+            ? custom.filter((addon) => !shared.has(addonUrlIdentity(addon.transportUrl)))
+            : custom
+        )
+      }
       return {
         id: account.id,
         version: account.record_version,
