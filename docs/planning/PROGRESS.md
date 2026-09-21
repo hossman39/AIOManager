@@ -19,6 +19,8 @@ build pass. An isolated browser reproduced the old failure, then recovered the
 same kind of identity with its original password, added a synthetic Stremio account,
 and retained the account and key across reload. The local test server serves the
 updated assets; refresh and unlock with the existing manager credentials.
+Vault fix `52a00c3` also passed all five hosted jobs in
+[run 35556520045](https://github.com/hossman39/AIOManager/actions/runs/35556520045).
 
 Activation with first-sync review, native Stremio transport, deployment-wide writer
 ownership, legacy proxy/Autopilot gates, pause/resume, retries, login repair,
