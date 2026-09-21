@@ -20,6 +20,13 @@ alone never activates an account or queues provider work. The suite now passes
 296 local tests, with 111 PostgreSQL cases reserved for hosted CI; typecheck,
 lint and the production build pass. Browser upgrade testing confirms an old
 account and its imported counterpart become one row with existing settings.
+The isolated browser also verifies fresh account addition, a London expiry,
+first-sync activation/readback, verified removal with cache cleanup across reload,
+and a 390px layout without page overflow. Auth-key accounts expose the saved-login
+completion action. Checkpoint `f4f5fd7` passed all five hosted jobs in
+[run 35655487090](https://github.com/hossman39/AIOManager/actions/runs/35655487090),
+including all 111 PostgreSQL cases and both container architectures. A stale
+membership-save notice is cleared when opening the next account editor.
 
 The first account-add acceptance report exposed an upstream vault initialization
 bug: registration accepted a short password, claimed the remote identity, swallowed

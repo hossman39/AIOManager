@@ -858,6 +858,7 @@ function ManagedWorkspace({ api, focusAccountId }: { api: ManagedApi; focusAccou
                       aria-label={`Edit personal addons for ${account.email}`}
                       onClick={(event) => {
                         returnFocus.current = event.currentTarget
+                        setMembershipNotice('')
                         setPersonalAccount(account)
                       }}
                     >
@@ -877,6 +878,7 @@ function ManagedWorkspace({ api, focusAccountId }: { api: ManagedApi; focusAccou
                       aria-label={`Manage sync for ${account.email}`}
                       onClick={(event) => {
                         returnFocus.current = event.currentTarget
+                        setMembershipNotice('')
                         setOperationsAccount(account)
                       }}
                     >
