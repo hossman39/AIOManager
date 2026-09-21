@@ -31,6 +31,18 @@ reordering, membership, first sync without a group, group joins and publication.
 The local test instance has upgraded to migration 7 with its original accounts
 and key retained; an encrypted SQLite copy was taken before the upgrade.
 
+Code checkpoint `6e3e00c` passed all five hosted jobs in
+[run 35666047415](https://github.com/hossman39/AIOManager/actions/runs/35666047415):
+310 local tests on Windows/Linux, all 114 PostgreSQL contracts, and AMD64/ARM64
+container checks. The final isolated browser rehearsal confirms that a shared
+publication reaches the unchanged member while the customized member keeps its
+own name; group removal retains both addons; a Tokyo cutoff suspends the account
+with verified readback; lifetime renewal restores it. A 390px mobile viewport has
+no horizontal overflow. The typing/polling regression was reproduced and fixed
+with a stable dialog descriptor. Unsaved membership navigation is guarded.
+The final local test build serves `index-DhkurzhQ.js` on port 1611 with its original
+database/key and schema 7; the page and both referenced static assets return 200.
+
 ## Earlier unified inventory checkpoint
 
 Accounts is now the single account workspace. Existing browser accounts connect
