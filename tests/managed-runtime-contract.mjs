@@ -8,6 +8,7 @@ import { createManagedRepository } from '../server/managed/repository.js'
 import { createStremioProvider, stremioCollection } from '../server/managed/stremio.js'
 import { configuredAddon } from './fixtures/addon-config.mjs'
 import { fakeStremio } from './fixtures/stremio.mjs'
+import { defaultExpiryNotice, EXPIRY_NOTICE_ADDON_ID } from '../shared/expiry-notice.js'
 
 async function runtimeFixture(storage) {
   const seeded = await preparePublicationFixture(storage, { count: 2 })
@@ -86,6 +87,136 @@ export function managedRuntimeContract(prefix, options, fixture) {
       }
     })
   check(
+    'expiry installs only the notice, repeated checks preserve setup, and renewal/removal clear the notice',
+    async (s) => {
+      await s.activate()
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      const original = structuredClone(s.user.addons)
+      let account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        {
+          expectedVersion: account.version,
+          mode: 'term',
+          local: '2020-01-01T12:00',
+          timezone: 'Asia/Tokyo',
+        },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+      const input = {
+        expectedVersion: (await s.repository.status(firstAuth)).version,
+        settings: {
+          ...defaultExpiryNotice,
+          enabled: true,
+          baseUrl: 'https://manager.example.invalid',
+          renewalUrl: 'https://renew.example.invalid',
+        },
+      }
+      const key = randomUUID()
+      const setting = await s.repository.saveExpiryNotice(firstAuth, input, key)
+      assert.equal(setting.queued, 1)
+      assert.equal((await s.repository.saveExpiryNotice(firstAuth, input, key)).replayed, true)
+      const installed = await s.runtime.runOnce()
+      assert.equal(installed.state, 'verified', JSON.stringify(installed))
+      assert.deepEqual(
+        s.user.addons.map((addon) => addon.manifest.id),
+        [EXPIRY_NOTICE_ADDON_ID]
+      )
+      assert.equal(s.user.addons[0].transportUrl, setting.settings.manifestUrl)
+      s.advance(300_001)
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      const saved = await s.repository.getAccountAddons(firstAuth, s.id)
+      assert.ok(saved.addons.every((addon) => addon.manifest.id !== EXPIRY_NOTICE_ADDON_ID))
+      // Group deletion on an expired member must preserve its renewal setup and notice.
+      const currentGroup = await s.repository.getGroup(firstAuth, saved.account.groupId)
+      await s.repository.deleteGroup(
+        firstAuth,
+        currentGroup.id,
+        { expectedVersion: currentGroup.version },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.equal(s.user.addons[0].manifest.id, EXPIRY_NOTICE_ADDON_ID)
+      account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        { expectedVersion: account.version, mode: 'lifetime' },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, original)
+      account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        { expectedVersion: account.version, mode: 'term', local: '2020-01-01T12:00' },
+        randomUUID()
+      )
+      const suspended = await s.runtime.runOnce()
+      assert.equal(suspended.state, 'verified', JSON.stringify(suspended))
+      account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.requestSync(
+        firstAuth,
+        s.id,
+        { expectedVersion: account.version },
+        randomUUID(),
+        true
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+    }
+  )
+  check(
+    'notice settings are private, versioned, and disabling replaces an already installed notice',
+    async (s) => {
+      const settings = {
+        ...defaultExpiryNotice,
+        enabled: true,
+        baseUrl: 'https://notice.example.invalid/',
+        message: 'Please renew through your manager.',
+      }
+      let result = await s.repository.saveExpiryNotice(
+        firstAuth,
+        { expectedVersion: 2, settings },
+        randomUUID()
+      )
+      assert.equal(result.settings.baseUrl, 'https://notice.example.invalid')
+      assert.ok(
+        !JSON.stringify(
+          await s.db.get('SELECT * FROM managed_owners WHERE owner_id = $1', [firstAuth.owner])
+        ).includes(settings.message)
+      )
+      assert.equal((await s.repository.getExpiryNotice(secondAuth)).settings.manifestUrl, null)
+      await assert.rejects(
+        s.repository.saveExpiryNotice(firstAuth, { expectedVersion: 2, settings }, randomUUID()),
+        { code: 'VERSION_CONFLICT' }
+      )
+      await s.activate()
+      await s.runtime.runOnce()
+      const account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        { expectedVersion: account.version, mode: 'term', local: '2020-01-01T12:00' },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.equal(s.user.addons[0].manifest.id, EXPIRY_NOTICE_ADDON_ID)
+      result = await s.repository.saveExpiryNotice(
+        firstAuth,
+        { expectedVersion: result.version, settings: { ...settings, enabled: false } },
+        randomUUID()
+      )
+      assert.equal(result.queued, 1)
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+    }
+  )
+  check(
     'activation reviews without writes, binds identity, queues once and verifies the exact native descriptor',
     async (s) => {
       const defaultAddon = {
@@ -115,6 +246,11 @@ export function managedRuntimeContract(prefix, options, fixture) {
       assert.equal(execution.job.state, 'verified')
       assert.equal(s.user.addons.length, 2)
       assert.equal(s.user.addons[1].manifest.name, 'Custom')
+      assert.equal(
+        (await s.repository.getAccountAddons(firstAuth, s.id, { live: true }))
+          .savedMatchesInstalled,
+        true
+      )
       assert.equal(Object.hasOwn(s.user.addons[1], 'metadata'), false)
       assert.equal((await s.db.get('SELECT COUNT(*) AS count FROM managed_snapshots')).count, 1)
       await assert.rejects(s.repository.accountExecution(secondAuth, s.id), { code: 'NOT_FOUND' })

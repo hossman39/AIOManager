@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { createExpiryNoticeRepository } from './expiry-notice.js'
 import { z } from 'zod'
 import { parseCredentialImport } from '../../shared/credential-import.js'
 import { resolveExpiry, MEMBERSHIP_TIMEZONE } from '../../shared/membership-expiry.js'
@@ -155,6 +156,7 @@ export function createManagedRepository({
 
   return Object.freeze({
     ...createManagedConnections({ crypto, ownerTransaction, publicAccount }),
+    ...createExpiryNoticeRepository({ db, crypto, authorize, ownerTransaction, idempotent, jobs }),
     ...createAccountAddonRepository({
       db,
       crypto,

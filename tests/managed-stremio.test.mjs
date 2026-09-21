@@ -4,6 +4,26 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { createStremioProvider } from '../server/managed/stremio.js'
 import { ManagedError } from '../server/managed/errors.js'
 
+test('managed collection reads reject missing sessions instead of reporting anonymous default addons', async () => {
+  let requests = 0
+  const provider = createStremioProvider({
+    fetch: async () => {
+      requests++
+      return Response.json({ result: { addons: [] } })
+    },
+  })
+  try {
+    for (const session of [undefined, null, {}, 'a-session-string', { authKey: '' }]) {
+      await assert.rejects(provider.getCollection(session), { code: 'INVALID_CREDENTIALS' })
+      await assert.rejects(provider.getIdentity(session), { code: 'INVALID_CREDENTIALS' })
+      await assert.rejects(provider.setCollection(session, []), { code: 'INVALID_CREDENTIALS' })
+    }
+    assert.equal(requests, 0)
+  } finally {
+    await provider.close()
+  }
+})
+
 test('the native transport rejects malformed, excessive, redirected, and ambiguous responses without remote text', async () => {
   for (const fetch of [
     async () => Response.json({ error: { message: 'https://secret.invalid/token', code: 9 } }),

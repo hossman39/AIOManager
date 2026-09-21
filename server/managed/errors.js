@@ -54,7 +54,7 @@ const definitions = {
     409,
     'This publication preview is invalid, expired, or changed. Prepare it again.',
   ],
-  GROUP_TOO_LARGE: [422, 'This publication exceeds the 1,000-member transaction limit.'],
+  GROUP_TOO_LARGE: [422, 'This group operation exceeds the 1,000-member transaction limit.'],
   EMPTY_PUBLICATION_CONFIRMATION: [
     409,
     'Publishing an empty or entirely disabled addon setup requires an explicit choice.',

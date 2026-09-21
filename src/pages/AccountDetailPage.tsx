@@ -23,6 +23,7 @@ import { accountStatus, membershipLabel } from '@/components/managed/account-lab
 import { useUIStore } from '@/store/uiStore'
 import { sameAddonSetup } from '../../shared/account-addons.js'
 import type { ManagedAddon } from '../../shared/addon-config.js'
+import { isExpiryNotice } from '../../shared/expiry-notice.js'
 
 type Api = ReturnType<typeof createManagedApi>
 const describe = (error: unknown) =>
@@ -303,6 +304,11 @@ function AccountAddons({
     return () => abort.current?.abort()
   }, [load])
   const dirty = data !== null && !sameAddonSetup(addons, data.addons)
+  const expired = account.expired || account.suspendedAt !== null
+  const verifiedDisabled =
+    account.appliedVersion === account.policyVersion && account.appliedTarget === 'suspended'
+  const installed = data?.installed ?? null
+  const installedRegular = installed?.filter((addon) => !isExpiryNotice(addon)) ?? []
   const locked =
     reading ||
     resolving ||
@@ -329,7 +335,11 @@ function AccountAddons({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="font-semibold">
-            {data?.source === 'stremio' ? 'Installed addons' : 'Account addons'}
+            {expired
+              ? 'Saved addons for renewal'
+              : data?.source === 'stremio'
+                ? 'Installed addons'
+                : 'Account addons'}
             {data ? ` (${addons.length})` : ''}
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -349,7 +359,7 @@ function AccountAddons({
               void load(true)
             }}
           >
-            <RefreshCw className={`h-4 w-4 ${reading ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`h-4 w-4 ${reading ? 'animate-spin' : ''}`} /> Check Stremio
           </Button>
           <Button
             disabled={locked || pending || !data || (!dirty && !!data.account.setupSaved)}
@@ -379,12 +389,66 @@ function AccountAddons({
           </Button>
         </div>
       )}
-      {(account.expired || account.suspendedAt !== null) && (
+      {expired && (
         <p className="rounded-lg border border-amber-500/30 p-3 text-sm">
-          This membership is expired. The setup below is saved for renewal; addons stay disabled on
-          Stremio.
+          {account.state === 'staged'
+            ? 'Membership expired, but sync has not been started. AIOManager has not disabled this account’s Stremio addons.'
+            : verifiedDisabled
+              ? `Normal addons were verified disabled on Stremio${account.verifiedAt ? ` at ${new Date(account.verifiedAt).toLocaleString()}` : ''}.`
+              : 'Membership expired. Disabling addons has not yet been verified. Check Sync & access for progress or errors.'}{' '}
+          The settings below are saved for renewal. Their switches do not show what is currently
+          installed.
         </p>
       )}
+      <section
+        className="space-y-2 rounded-lg border bg-muted/10 p-3 text-sm"
+        aria-label="Stremio installed addons"
+      >
+        <p className="font-medium">Installed on Stremio</p>
+        <p className="break-all text-muted-foreground">Account: {account.email}</p>
+        {installed ? (
+          <>
+            <p>
+              {installedRegular.length} normal addon{installedRegular.length === 1 ? '' : 's'}
+              {installed.some(isExpiryNotice) ? ' · Membership expired notice installed' : ''}
+              {data?.installedAt
+                ? ` · Checked ${new Date(data.installedAt).toLocaleTimeString()}`
+                : ''}
+            </p>
+            {installed.length > 0 && (
+              <ul className="flex flex-wrap gap-2" aria-label="Installed addon names">
+                {installed.map((addon) => (
+                  <li key={addon.transportUrl} className="rounded border px-2 py-1">
+                    {addon.manifest.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {expired && installedRegular.length > 0 && (
+              <p className="text-amber-600 dark:text-amber-400">
+                Normal addons are still installed.{' '}
+                {account.state === 'staged'
+                  ? 'Start sync from Sync & access to enforce expiry.'
+                  : 'Open Sync & access to check or retry the disabling job.'}
+              </p>
+            )}
+            {(data?.account.version !== account.version ||
+              (data?.installedAt && (account.verifiedAt ?? 0) > data.installedAt)) && (
+              <p className="text-muted-foreground">
+                This account changed after the check. Check Stremio again for the latest list.
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              If your Stremio app shows a different list, fully close and reopen it, then check that
+              it is signed into the account above.
+            </p>
+          </>
+        ) : (
+          <p className="text-muted-foreground">
+            Use Check Stremio to read the account’s actual installed addon list.
+          </p>
+        )}
+      </section>
       {(error || mutation.message) && (
         <p role="alert" className="text-sm text-destructive">
           {error || mutation.message}
@@ -421,8 +485,9 @@ function AccountAddons({
         </div>
       )}
       {data?.installed &&
+        !expired &&
         data.source === 'saved' &&
-        !sameAddonSetup(data.installed, data.addons) && (
+        data.savedMatchesInstalled === false && (
           <details className="rounded-lg border p-3 text-sm">
             <summary className="cursor-pointer text-muted-foreground">
               Stremio currently differs from this saved setup
@@ -437,7 +502,7 @@ function AccountAddons({
               variant="outline"
               disabled={locked || pending}
               onClick={() => {
-                setAddons(data.installed!)
+                setAddons(data.installed!.filter((addon) => !isExpiryNotice(addon)))
                 setNotice('Stremio addons copied to the draft. Review before saving.')
               }}
             >
@@ -455,6 +520,7 @@ function AccountAddons({
           key={epoch}
           api={api}
           addons={addons}
+          renewalOnly={expired}
           groupAddons={data.account.groupId ? data.groupAddons : undefined}
           onChange={setAddons}
           disabled={

@@ -1,11 +1,13 @@
 import { z } from 'zod'
 import { accountSetupChanges, sameAddonSetup } from '../../shared/account-addons.js'
-import { checkedCollection, projectManagedCollection } from './projection.js'
+import { checkedCollection, projectManagedCollection, providerCollection } from './projection.js'
+import { stremioCollection } from './stremio.js'
 import { readAccountSetup } from './account-setup.js'
 import { providerIdentityKey } from './execution.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { parseAddonConfiguration } from '../../shared/addon-config.js'
+import { isExpiryNotice } from '../../shared/expiry-notice.js'
 
 const saveSchema = z.strictObject({
   expectedVersion: z.number().int().positive(),
@@ -67,6 +69,11 @@ export function createAccountAddonRepository({
     overrides: setup.accountOverrides,
     source,
     installed,
+    installedAt: installed === null ? null : Date.now(),
+    savedMatchesInstalled:
+      installed === null
+        ? null
+        : sameAddonSetup(installed, stremioCollection(providerCollection(addons))),
   })
   return {
     async getAccountAddons(auth, id, { live = false } = {}) {
@@ -80,7 +87,7 @@ export function createAccountAddonRepository({
         setup.personal.length === 0
       const installed = initial || live ? await readRemote(row) : null
       const addons = initial
-        ? installed
+        ? installed.filter((addon) => !isExpiryNotice(addon))
         : projectManagedCollection({ ...setup, remote: [], target: 'active' }).configuration
       return response(row, setup, addons, installed, initial ? 'stremio' : 'saved')
     },
@@ -91,6 +98,7 @@ export function createAccountAddonRepository({
       const configuration = parseAddonConfiguration(value.addons)
       if (!configuration.ok) throw new ManagedError(configuration.code)
       value.addons = configuration.addons
+      if (value.addons.some(isExpiryNotice)) throw new ManagedError('INVALID_ADDON_CONFIG')
       if (!value.addons.some((addon) => addon.flags?.enabled !== false) && !value.allowEmpty)
         throw new ManagedError('EMPTY_PUBLICATION_CONFIRMATION')
       return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>

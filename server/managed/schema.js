@@ -224,6 +224,13 @@ CREATE INDEX managed_account_links_email ON managed_account_links (owner_id, ema
     sql: `ALTER TABLE managed_accounts ADD COLUMN addon_overrides_enc TEXT;
 ALTER TABLE managed_accounts ADD COLUMN addons_initialized INTEGER NOT NULL DEFAULT 0 CHECK (addons_initialized IN (0, 1));`,
   }),
+  Object.freeze({
+    version: 8,
+    name: 'membership-expiry-notice',
+    sql: `ALTER TABLE managed_owners ADD COLUMN expiry_notice_enc TEXT;
+ALTER TABLE managed_owners ADD COLUMN expiry_notice_token TEXT;
+CREATE UNIQUE INDEX managed_owners_expiry_notice ON managed_owners (expiry_notice_token);`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

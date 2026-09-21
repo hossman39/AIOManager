@@ -3,6 +3,7 @@ import { ManagedError } from './errors.js'
 import { checkedCollection } from './projection.js'
 import { readAccountSetup } from './account-setup.js'
 import { emptyAccountOverrides } from '../../shared/account-addons.js'
+import { readExpiryNotice, expiryNoticeAddon } from './expiry-notice.js'
 
 export const providerIdentityKey = (crypto, id) =>
   crypto.fingerprint(id, {
@@ -38,6 +39,12 @@ export async function readExecutionPolicy(tx, account, crypto, target) {
     const setup = await readAccountSetup(tx, account, crypto, { publishedOnly: true })
     ;({ group, personal, safeMode, revision, accountOverrides } = setup)
   }
+  const expiryNotice = expiryNoticeAddon(
+    readExpiryNotice(
+      await tx.get('SELECT * FROM managed_owners WHERE owner_id = $1', [account.owner_id]),
+      crypto
+    )
+  )
   const stamp = crypto.fingerprint(
     {
       provider,
@@ -48,10 +55,22 @@ export async function readExecutionPolicy(tx, account, crypto, target) {
       groupId: account.group_id,
       accountOverrides,
       individual,
+      expiryNotice,
     },
     binding('execution-policy')
   )
-  return { provider, group, personal, saved, safeMode, target, stamp, accountOverrides, individual }
+  return {
+    provider,
+    group,
+    personal,
+    saved,
+    safeMode,
+    target,
+    stamp,
+    accountOverrides,
+    individual,
+    expiryNotice,
+  }
 }
 
 export function checkedExecutionPlan(plan) {

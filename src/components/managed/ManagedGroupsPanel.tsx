@@ -12,6 +12,7 @@ import {
 } from '@/api/managed'
 import { AddonDraftError, checkedAddonDraft } from '@/lib/managed/addon-draft'
 import { ManagedAddonCards } from './ManagedAddonCards'
+import { DeleteGroupButton } from './DeleteGroupButton'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
 
 type Api = ReturnType<typeof createManagedApi>
@@ -38,6 +39,7 @@ function GroupEditor({
   onClose,
   onLock,
   externalBusy,
+  onDeleted,
 }: {
   group: ManagedGroup
   api: Api
@@ -45,6 +47,7 @@ function GroupEditor({
   onClose: () => void
   onLock: (locked: boolean) => void
   externalBusy: boolean
+  onDeleted: (count: number) => void
 }) {
   const [name, setName] = useState(group.name)
   const [addons, setAddons] = useState(group.draft)
@@ -54,6 +57,7 @@ function GroupEditor({
   const [pendingUrl, setPendingUrl] = useState(false)
   const [editorEpoch, setEditorEpoch] = useState(0)
   const [reading, setReading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
   const [preview, setPreview] = useState<ManagedPublicationPreview | null>(null)
   const [allowEmpty, setAllowEmpty] = useState(false)
@@ -84,7 +88,13 @@ function GroupEditor({
     }
   )
   const locked =
-    externalBusy || mutation.busy || mutation.uncertain || mutation.stale || resolving || reading
+    externalBusy ||
+    mutation.busy ||
+    mutation.uncertain ||
+    mutation.stale ||
+    resolving ||
+    reading ||
+    deleting
   useUnsavedWarning(dirty || pendingUrl || resolving || mutation.busy || mutation.uncertain)
   useEffect(() => {
     alive.current = true
@@ -218,7 +228,7 @@ function GroupEditor({
           </select>
         </label>
         <p className="text-xs text-muted-foreground">
-          Saved protection settings apply on the next sync. Expiry still disables every addon,
+          Saved protection settings apply on the next sync. Expiry still disables normal addons,
           including protected entries.
         </p>
       </fieldset>
@@ -269,7 +279,7 @@ function GroupEditor({
         <Button
           type="button"
           variant="outline"
-          disabled={mutation.busy || mutation.uncertain || reading || resolving}
+          disabled={mutation.busy || mutation.uncertain || reading || resolving || deleting}
           onClick={() => void reload()}
         >
           {dirty || pendingUrl ? 'Discard edits & reload saved group' : 'Reload saved group'}
@@ -350,6 +360,13 @@ function GroupEditor({
           )}
         </div>
       )}
+      <DeleteGroupButton
+        api={api}
+        group={group}
+        disabled={locked || dirty || pendingUrl}
+        onBusy={setDeleting}
+        onDeleted={onDeleted}
+      />
     </section>
   )
 }
@@ -643,6 +660,16 @@ export function ManagedGroupsPanel({
           onClose={() => setSelected(null)}
           onLock={setSelectionLocked}
           externalBusy={loading}
+          onDeleted={(count) => {
+            cancelReads()
+            setGroups((previous) => previous.filter((group) => group.id !== selected.id))
+            setSelected(null)
+            setNotice(
+              `Group deleted. ${count} account${count === 1 ? '' : 's'} kept with individual addon setups.`
+            )
+            onAccountsChanged()
+            void load()
+          }}
         />
       )}
       {selected && (

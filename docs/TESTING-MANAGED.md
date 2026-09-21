@@ -3,7 +3,7 @@
 This build supports individual account setups, optional groups, account-specific
 overrides, first-sync review and
 activation, selectable expiry timezones, automatic suspension, renewal, retry,
-login repair, and verified removal. Use the dedicated Stremio test accounts and
+login repair, group deletion, an optional Stremio expiry notice, and verified removal. Use the dedicated Stremio test accounts and
 Android devices agreed for acceptance testing.
 
 ## Start on this computer
@@ -54,7 +54,8 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
 4. Open **Sync & access**, choose **Preview first sync**, review the addon list,
    confirm it and choose **Start sync**. No group is required. If paused, open
    **Accounts → ⋯ → Sync settings** and resume sync. Wait for **verified** in
-   **Sync & access**, then check the same Stremio login on Android, including
+   **Sync & access**. On **Addons**, use **Check Stremio** to see the actual installed
+   list and the email being checked. Then check the same Stremio login on Android, including
    order, names, catalogs and protected/default entries.
 5. On **Groups**, create a group, add addons, save its draft, preview and publish.
    Use the account's **Group** tab to join it, or **Assign group** on Accounts for
@@ -64,14 +65,30 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    version** resets an individual addon override. Leave the group and confirm the
    complete saved setup is retained for independent management. Pause and resume
    from Sync settings to check that changes wait while paused.
+   Open a disposable group and choose **Delete group**. Confirm the dialog; the
+   group should disappear and its members should remain as individual accounts,
+   with their complete addon setups, customizations and memberships preserved.
 6. Set one account's expiry a few minutes ahead, in the chosen timezone. After the
    cutoff, check **Expired accounts**, the verified suspension status, and Android.
+   **Expired · disable pending** must not be mistaken for a verified suspension;
+   a staged expired account says **sync not started**. The saved addon switches
+   are labeled **On renewal**. **Check Stremio** shows what is actually installed.
    Saved addon configuration and former group assignment must remain available.
    Expired accounts are rechecked about every five minutes, subject to backlog
    and provider availability. Ordinary active client edits are not periodically
    replaced.
+   To show an expiry card, open **Accounts → ⋯ → Sync settings → Expiry notice in
+   Stremio**, enable it, and save the address of this AIOManager installation,
+   a message, and an optional renewal/contact URL. Existing expired accounts are
+   queued for this change. Check that only **Membership expired** is installed;
+   Stremio should show its Home/Discover card and an expiry notice in movie/series
+   source lists. Without a renewal URL, the notice opens a simple information page.
+   The URL must be reachable from the Stremio device and allow unauthenticated
+   access to `/api/notice/*`. `127.0.0.1:1611` works only on this Windows computer;
+   use the test installation's public HTTPS address for a TV or another device.
 7. Renew with a future cutoff or lifetime. Verify the current group and personal
-   setup returns while intentionally disabled addons stay off.
+   setup returns while intentionally disabled addons stay off and the expiry
+   notice is removed.
 8. On a disposable account, select **Sync & access → Remove this account → Clear
    addons and remove account**. The account should
    disappear only after an empty collection is read back from Stremio. A failure
@@ -89,6 +106,14 @@ ordinary account creation needs no export/import step.
 Expiry changes the active addon collection. Android caches and playing streams
 must be checked on the device; server verification does not assert that playback
 was terminated or that the Stremio login was revoked.
+If Stremio still shows defaults while **Check Stremio** shows your configured
+addons, fully close/reopen Stremio and confirm the app is signed into the displayed
+email. An account marked **Sync not started** retains its existing Stremio setup
+until its first sync is reviewed and started.
+
+The notice follows Stremio's [manifest and resource protocol](https://stremio.github.io/stremio-addon-sdk/api/responses/manifest.html)
+and uses an [external link in the source list](https://stremio.github.io/stremio-addon-sdk/api/responses/stream.html).
+It contains no account identity, password, auth key, or individual membership date.
 
 ## Separate Docker / Portainer test stack
 

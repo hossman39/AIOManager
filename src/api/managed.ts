@@ -4,6 +4,7 @@ import type { CredentialUpload } from '@/lib/managed/prepare-import'
 import { parseAddonConfiguration, type ManagedAddon } from '../../shared/addon-config.js'
 import { validMembershipTimezone } from '../../shared/membership-expiry.js'
 import { parseAccountOverrides } from '../../shared/account-addons.js'
+import type { ExpiryNoticeSettings } from '../../shared/expiry-notice.js'
 
 const issueSchema = z.object({
   row: z.number().int().positive(),
@@ -115,6 +116,17 @@ const statusSchema = z.object({
     offboarding: z.number().int(),
   }),
 })
+const expiryNoticeSettingsSchema = z.object({
+  enabled: z.boolean(),
+  baseUrl: z.string(),
+  message: z.string(),
+  renewalUrl: z.string(),
+  manifestUrl: z.string().nullable(),
+})
+const expiryNoticeSchema = z.object({
+  version: z.number().int().positive().nullable(),
+  settings: expiryNoticeSettingsSchema,
+})
 
 const activationPreviewSchema = z
   .object({
@@ -177,6 +189,8 @@ const accountAddonsSchema = z.object({
   }),
   source: z.enum(['saved', 'stremio']),
   installed: addonsSchema.nullable(),
+  installedAt: z.number().int().nullable().optional(),
+  savedMatchesInstalled: z.boolean().nullable().optional(),
 })
 const accountAddonsResultSchema = accountAddonsSchema.extend({
   jobId: z.uuid().nullable(),
@@ -327,6 +341,7 @@ export type ManagedSettings = {
   writePaused: boolean
   safeMode: boolean
 }
+export type ManagedExpiryNotice = z.infer<typeof expiryNoticeSchema>
 export type ManagedGroup = z.infer<typeof groupSchema>
 export type ManagedGroupSummary = z.infer<typeof groupSummarySchema>
 export type ManagedPublicationPreview = z.infer<typeof publicationPreviewSchema>
@@ -353,7 +368,7 @@ const errorMessages = {
   ADDON_LAYER_CONFLICT:
     'An addon URL appears in both the group and personal setup. Resolve the duplicate explicitly.',
   GROUP_NOT_PUBLISHED: 'Publish the destination group before assigning active users.',
-  GROUP_TOO_LARGE: 'This publication exceeds the 1,000-member limit.',
+  GROUP_TOO_LARGE: 'This group operation exceeds the 1,000-member limit.',
   PUBLICATION_UNAVAILABLE: 'Group publication is not available on this backend.',
   PREVIEW_STALE: 'This preview expired or the group or its members changed. Prepare a new preview.',
   EMPTY_PUBLICATION_CONFIRMATION:
@@ -490,6 +505,21 @@ export function createManagedApi({
   }
   return {
     status: (signal?: AbortSignal) => request('/status', statusSchema, { signal }),
+    expiryNotice: (signal?: AbortSignal) =>
+      request('/expiry-notice', expiryNoticeSchema, { signal }),
+    saveExpiryNotice: (
+      body: { expectedVersion: number | null; settings: ExpiryNoticeSettings },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(
+        '/expiry-notice',
+        expiryNoticeSchema.extend({
+          queued: z.number().int().nonnegative(),
+          replayed: z.boolean(),
+        }),
+        { body, key, signal }
+      ),
     saveSettings: (body: ManagedSettings, key: string, signal?: AbortSignal) =>
       request('/settings', settingsResultSchema, { body, key, signal }),
     activationPreview: (
@@ -555,6 +585,16 @@ export function createManagedApi({
       ),
     group: (id: string, signal?: AbortSignal) =>
       request(`/groups/${encodeURIComponent(id)}`, groupSchema, { signal }),
+    deleteGroup: (id: string, expectedVersion: number, key: string, signal?: AbortSignal) =>
+      request(
+        `/groups/${encodeURIComponent(id)}/delete`,
+        z.object({
+          id: z.uuid(),
+          detachedAccounts: z.number().int().nonnegative(),
+          replayed: z.boolean(),
+        }),
+        { body: { expectedVersion }, key, signal }
+      ),
     createGroup: (draft: ManagedGroupDraft, key: string, signal?: AbortSignal) =>
       request('/groups', groupResultSchema, { body: draft, key, signal }),
     saveGroupDraft: (

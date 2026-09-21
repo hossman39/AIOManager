@@ -144,6 +144,22 @@ export async function registerManagedRoutes(app, repository, manifestService) {
       routes.get('/groups/:id', (request) =>
         repository.getGroup(request.managedAuth, request.params.id)
       )
+      routes.get('/expiry-notice', (request) => repository.getExpiryNotice(request.managedAuth))
+      routes.post('/expiry-notice', { bodyLimit: 8192 }, (request) =>
+        repository.saveExpiryNotice(
+          request.managedAuth,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/groups/:id/delete', { bodyLimit: 4096 }, (request) =>
+        repository.deleteGroup(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
       routes.get('/groups/:id/deployment', (request) =>
         repository.getGroupDeployment(request.managedAuth, request.params.id)
       )

@@ -177,6 +177,16 @@ export function createStremioProvider({
       throw new ProviderFailure('DATA_UNREADABLE')
     return { id: value._id, email: value.email }
   }
+  const authenticated = (session) => {
+    if (
+      !session ||
+      typeof session.authKey !== 'string' ||
+      !session.authKey ||
+      session.authKey.length > 16_384
+    )
+      throw new ProviderFailure('INVALID_CREDENTIALS')
+    return session.authKey
+  }
   return Object.freeze({
     raw,
     normalizeCollection: stremioCollection,
@@ -186,15 +196,18 @@ export function createStremioProvider({
         throw new ProviderFailure('DATA_UNREADABLE')
       return { ...profile(result.user), authKey: result.authKey }
     },
-    async getIdentity({ authKey }, options) {
+    async getIdentity(session, options) {
+      const authKey = authenticated(session)
       return profile((await raw('GetUser', { authKey }, options)).result).id
     },
-    async getCollection({ authKey }, options) {
+    async getCollection(session, options) {
+      const authKey = authenticated(session)
       return stremioCollection(
         (await raw('AddonCollectionGet', { authKey, update: false }, options)).result.addons
       )
     },
-    async setCollection({ authKey }, addons, options) {
+    async setCollection(session, addons, options) {
+      const authKey = authenticated(session)
       const { result } = await raw(
         'AddonCollectionSet',
         { authKey, addons: stremioCollection(addons) },

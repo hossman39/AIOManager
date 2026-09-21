@@ -46,6 +46,7 @@ type Props = {
   onChange: (addons: ManagedAddon[]) => void
   api: Pick<ReturnType<typeof createManagedApi>, 'resolveManifest'>
   disabled?: boolean
+  renewalOnly?: boolean
   groupAddons?: ManagedAddon[]
   onBusyChange?: (busy: boolean) => void
   onPendingChange?: (pending: boolean) => void
@@ -77,6 +78,7 @@ export function ManagedAddonCards({
   onChange,
   api,
   disabled = false,
+  renewalOnly = false,
   groupAddons,
   onBusyChange,
   onPendingChange,
@@ -257,12 +259,18 @@ export function ManagedAddonCards({
                 <Switch
                   checked={addon.flags?.enabled !== false}
                   disabled={locked}
-                  aria-label={`Enable ${nameOf(addon)}`}
+                  aria-label={`${renewalOnly ? 'Enable on renewal' : 'Enable'} ${nameOf(addon)}`}
+                  className={renewalOnly ? 'data-[state=checked]:bg-muted-foreground' : undefined}
                   onCheckedChange={(enabled) =>
                     edit(addon.transportUrl, { ...addon, flags: { ...addon.flags, enabled } })
                   }
                 />
               </div>
+              {renewalOnly && (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  On renewal: {addon.flags?.enabled !== false ? 'enabled' : 'disabled'}
+                </p>
+              )}
               <p className="mb-4 line-clamp-2 min-h-10 text-sm text-muted-foreground">
                 {addon.metadata?.customDescription ||
                   addon.manifest.description ||

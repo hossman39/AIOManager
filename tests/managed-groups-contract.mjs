@@ -61,6 +61,73 @@ export function managedGroupsContract(prefix, options, fixture) {
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
 
   check(
+    'deleting a group preserves individual setups, rejects stale/foreign requests, and replays once',
+    async (storage) => {
+      const { db, repository, accounts, group } = await prepareGroupFixture(storage)
+      const assigned = await repository.assignGroup(
+        firstAuth,
+        {
+          groupId: group.id,
+          accounts: accounts.map(({ id }) => ({ id, expectedVersion: 1 })),
+        },
+        randomUUID()
+      )
+      const first = assigned.accounts[0].account
+      const custom = { ...configuredAddon(), metadata: { customName: 'Only this member' } }
+      await repository.setAccountAddons(
+        firstAuth,
+        first.id,
+        {
+          expectedVersion: first.version,
+          groupVersion: group.version,
+          addons: [custom],
+          allowEmpty: true,
+        },
+        randomUUID()
+      )
+      const before = await Promise.all(
+        accounts.map(({ id }) => repository.getAccountAddons(firstAuth, id))
+      )
+      await assert.rejects(
+        repository.deleteGroup(secondAuth, group.id, { expectedVersion: 1 }, randomUUID()),
+        { code: 'NOT_FOUND' }
+      )
+      await assert.rejects(
+        repository.deleteGroup(firstAuth, group.id, { expectedVersion: 2 }, randomUUID()),
+        { code: 'VERSION_CONFLICT' }
+      )
+      const key = randomUUID()
+      const result = await repository.deleteGroup(firstAuth, group.id, { expectedVersion: 1 }, key)
+      assert.equal(result.detachedAccounts, accounts.length)
+      assert.equal(
+        (await repository.deleteGroup(firstAuth, group.id, { expectedVersion: 1 }, key)).replayed,
+        true
+      )
+      assert.deepEqual((await repository.listGroups(firstAuth)).groups, [])
+      assert.equal(
+        (await db.get('SELECT archived FROM managed_groups WHERE id = $1', [group.id])).archived,
+        1
+      )
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+      for (const old of before) {
+        const after = await repository.getAccountAddons(firstAuth, old.account.id)
+        assert.equal(after.account.groupId, null)
+        assert.equal(after.account.setupSaved, true)
+        assert.equal(after.account.state, 'staged')
+        assert.deepEqual(after.addons, old.addons)
+      }
+      await assert.rejects(
+        repository.assignGroup(
+          firstAuth,
+          { groupId: group.id, accounts: [{ id: first.id, expectedVersion: first.version }] },
+          randomUUID()
+        ),
+        { code: 'INVALID_STATE' }
+      )
+    }
+  )
+
+  check(
     'draft creation is encrypted, retry-safe, safe by default and job-free',
     async ({ db, repository, crypto }) => {
       const key = randomUUID()

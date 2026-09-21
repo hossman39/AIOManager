@@ -4,6 +4,7 @@ import { ManagedApiError, type createManagedApi, type ManagedStatus } from '@/ap
 import { Button } from '@/components/ui/button'
 import { useManagedApi } from '@/components/managed/useManagedApi'
 import { ManagedRuntimeControls } from '@/components/managed/ManagedRuntimeControls'
+import { ExpiryNoticeEditor } from '@/components/managed/ExpiryNoticeEditor'
 
 export function AccountSyncSettingsPage() {
   const { api, ownerKey } = useManagedApi()
@@ -53,6 +54,7 @@ function SyncSettings({ api }: { api: ReturnType<typeof createManagedApi> }) {
           Reload settings
         </Button>
       )}
+      <ExpiryNoticeEditor api={api} onChanged={() => void load()} />
     </div>
   )
 }

@@ -25,6 +25,7 @@ const createInput = draftInput.extend({
 })
 const saveInput = draftInput.extend({ expectedVersion: version })
 const personalInput = z.strictObject({ expectedVersion: version, addons: z.unknown() })
+const deleteInput = z.strictObject({ expectedVersion: version })
 const assignmentInput = z.strictObject({
   groupId: z.uuid().nullable(),
   useGroupAddons: z.boolean().optional(),
@@ -244,6 +245,68 @@ export function createManagedGroupRepository({
         true
       )
     },
+    async deleteGroup(auth, id, input, key) {
+      const value = parse(deleteInput, input)
+      return ownerTransaction(auth, (tx, owner, _ownerRow, timestamp) =>
+        idempotent(tx, owner, 'groups.delete', key, { id, ...value }, timestamp, async () => {
+          const row = await group(tx, owner, id, true)
+          if (row.version !== value.expectedVersion) throw new ManagedError('VERSION_CONFLICT')
+          if (row.archived) throw new ManagedError('NOT_FOUND')
+          const members = await tx.query(
+            `SELECT * FROM managed_accounts WHERE owner_id = $1 AND group_id = $2 ORDER BY id LIMIT 1001${lock(tx)}`,
+            [owner, id]
+          )
+          if (members.length > 1000) throw new ManagedError('GROUP_TOO_LARGE')
+          for (const account of members) {
+            // Materialize the effective setup before archiving the shared template.
+            // Disabled preferences and account overrides survive expiry and deletion.
+            const setup = await readAccountSetup(tx, account, crypto)
+            const individual = projectManagedCollection({
+              ...setup,
+              remote: [],
+              target: 'active',
+            }).configuration
+            await tx.run(
+              `UPDATE managed_accounts SET group_id = NULL, personal_enc = $1,
+              addon_overrides_enc = $2, addons_initialized = 1,
+              record_version = record_version + 1, policy_version = policy_version + 1,
+              updated_at = $3 WHERE owner_id = $4 AND id = $5`,
+              [
+                crypto.seal(individual, context(owner, account.id, 'personal-addons')),
+                crypto.seal(
+                  emptyAccountOverrides(),
+                  context(owner, account.id, 'account-addon-overrides')
+                ),
+                timestamp,
+                owner,
+                account.id,
+              ]
+            )
+            if (account.state !== 'staged') {
+              const updated = await tx.get(
+                'SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2',
+                [owner, account.id]
+              )
+              await jobs.enqueueInTransaction(tx, updated, 'assignment', timestamp)
+            }
+          }
+          // Keep immutable revisions and rollout history for audit/restore.
+          await tx.run(
+            'UPDATE managed_groups SET archived = 1, version = version + 1, updated_at = $1 WHERE owner_id = $2 AND id = $3',
+            [timestamp, owner, id]
+          )
+          await audit(
+            tx,
+            owner,
+            'group.deleted',
+            id,
+            { detachedAccounts: members.length },
+            timestamp
+          )
+          return { id, detachedAccounts: members.length, replayed: false }
+        })
+      )
+    },
     async listGroups(auth, { limit = 100, after = '' } = {}) {
       if (
         !Number.isInteger(limit) ||
@@ -258,7 +321,7 @@ export function createManagedGroupRepository({
         owner,
       ])
       const rows = await db.query(
-        'SELECT * FROM managed_groups WHERE owner_id = $1 AND id > $2 ORDER BY id LIMIT $3',
+        'SELECT * FROM managed_groups WHERE owner_id = $1 AND archived = 0 AND id > $2 ORDER BY id LIMIT $3',
         [owner, after, limit + 1]
       )
       return {

@@ -14,6 +14,7 @@ import { migrateManagedSchema } from './managed/schema.js'
 import { initializeManagedCrypto, equalSecret } from './managed/crypto.js'
 import { createManagedRepository } from './managed/repository.js'
 import { registerManagedRoutes } from './managed/routes.js'
+import { registerExpiryNoticeRoutes } from './managed/expiry-notice.js'
 import { createManagedManifestService } from './managed/manifests.js'
 import { createManagedRuntime } from './managed/runtime.js'
 import { createStremioProvider } from './managed/stremio.js'
@@ -514,6 +515,7 @@ export async function buildServer(options = {}) {
     // Register Gzip Compression (Reduces network payload size by ~80%)
     await fastify.register(fastifyCompress, { global: true })
     await registerManagedRoutes(fastify, managedRepository, manifestService)
+    await registerExpiryNoticeRoutes(fastify, { db, crypto: managedCrypto })
 
     // Serve Static Files
     const distPath = options.staticDir || path.join(__dirname, '../dist')

@@ -191,8 +191,8 @@ export function ManagedAccountOperations({
       {current.state === 'staged' ? (
         <div className="space-y-3">
           <p className="text-sm">
-            Save this account’s addons (or choose a published group) and set a membership first. Preview signs in
-            to the existing Stremio account and reads its addons.
+            Save this account’s addons (or choose a published group) and set a membership first.
+            Preview signs in to the existing Stremio account and reads its addons.
           </p>
           <label className="block space-y-1 text-sm">
             <span>Protection for this account</span>
@@ -213,7 +213,12 @@ export function ManagedAccountOperations({
           </label>
           <Button
             variant="outline"
-            disabled={locked || !enabled || (!current.groupId && !current.setupSaved) || current.membershipType === 'unset'}
+            disabled={
+              locked ||
+              !enabled ||
+              (!current.groupId && !current.setupSaved) ||
+              current.membershipType === 'unset'
+            }
             onClick={() => void prepare()}
           >
             {reading ? 'Preparing preview…' : 'Preview first sync'}
@@ -226,8 +231,8 @@ export function ManagedAccountOperations({
               </p>
               {preview.target === 'suspended' && (
                 <p>
-                  This membership has expired. Activation will disable all addons and retain the
-                  saved setup.
+                  This membership has expired. Activation will disable normal addons and retain the
+                  saved setup. If configured, only the membership notice will remain.
                 </p>
               )}
               {preview.addons.length > 0 && (

@@ -6,6 +6,43 @@ been accessed or modified. Branch checkpoints/CI do not authorize production rol
 
 ## Current testing increment
 
+Expiry status now distinguishes membership expiry, pending enforcement and verified
+disabling. The account's **Check Stremio** action lists the provider's actual addons
+and the checked email; saved switches explicitly describe renewal preferences.
+Live comparison normalizes outgoing manifests so custom names/disabled preferences
+do not create false drift. Native managed transport rejects missing sessions before
+Stremio can return anonymous defaults.
+
+Group deletion is owner scoped, versioned, transactional and retry safe. Members
+become individual accounts with effective setups preserved, including overrides,
+disabled preferences and protected entries. Revisions and audit history remain;
+deleted groups disappear from selection. Active/expired/offboarding work retains
+the existing version fencing and durable verification.
+
+Migration 8 stores encrypted manager expiry-notice settings and an opaque public
+notice token. The optional addon replaces normal addons on expiry, provides a
+Home/Discover card and movie/series source notice, and is removed on renewal or
+offboarding. Its public routes expose only the chosen notice and renewal link.
+The system notice is excluded from saved renewal configuration. The installation
+address must be reachable from the Stremio device; local loopback is for this PC.
+
+Local validation passes 315 tests (117 PostgreSQL contracts reserved for hosted
+CI), typecheck, lint and build. HTTP tests cover public protocol responses, PNG,
+CORS, authentication, invalid settings and escaped fallback HTML. Shared runtime
+contracts cover repeated suspension, settings changes, group deletion while expired,
+renewal and notice removal. Backup/restore preserves encrypted notice settings.
+An isolated browser rehearsal verified saving the notice, an installed list of
+only the notice, deleting a two-member group without losing accounts, and renewal
+restoring the normal addon.
+
+Read-only diagnosis of the dedicated real test instance confirmed its activated
+account's Stremio identity and email, and four installed addons (AIOMetadata,
+Cinemeta, OpenSubtitles v3 and Streams). The second account was still staged.
+At that check the first account had been renewed. Device-side display/cache has
+not been verified; no real Stremio account was changed by the diagnostic reads.
+
+## Earlier individual-account checkpoint
+
 Individual management is restored. Accounts now uses summary cards with an
 **Open account** link; each detail page contains addon cards, membership, an
 optional group, and sync/access controls. Groups and global sync settings are

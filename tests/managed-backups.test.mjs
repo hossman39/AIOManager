@@ -23,6 +23,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { buildServer } from '../server/app.js'
 import { configuredAddon } from './fixtures/addon-config.mjs'
+import { defaultExpiryNotice } from '../shared/expiry-notice.js'
 
 test('daily encrypted snapshots restore credentials, selected timezone, and key material with all writes paused', async () => {
   const directory = await fs.mkdtemp(path.join(tmpdir(), 'aiomanager-backup-test-'))
@@ -76,6 +77,19 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
       },
       randomUUID()
     )
+    const expiryNotice = await s.repository.saveExpiryNotice(
+      firstAuth,
+      {
+        expectedVersion: 1,
+        settings: {
+          ...defaultExpiryNotice,
+          enabled: true,
+          baseUrl: 'https://notice.example.invalid',
+          message: 'Private renewal instructions',
+        },
+      },
+      randomUUID()
+    )
     const keys = { primary: syntheticKey, candidates: [syntheticKey, 'synthetic-retired-key'] }
     scheduler = createManagedBackupScheduler({ db: source, keys, directory, now: s.now })
     const backup = await scheduler.run()
@@ -85,6 +99,7 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     assert.equal(bytes.includes(Buffer.from('Person@example.invalid')), false)
     assert.equal(bytes.includes(Buffer.from(syntheticKey)), false)
     assert.equal(bytes.includes(Buffer.from('Private account override')), false)
+    assert.equal(bytes.includes(Buffer.from('Private renewal instructions')), false)
     await restored.exec(
       'CREATE TABLE kv_store (key TEXT PRIMARY KEY, value TEXT, password TEXT, updated_at BIGINT)'
     )
@@ -118,6 +133,7 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     assert.equal(account.setupSaved, true)
     const setup = await repository.getAccountAddons(firstAuth, id)
     assert.deepEqual(setup.addons, [custom])
+    assert.deepEqual((await repository.getExpiryNotice(firstAuth)).settings, expiryNotice.settings)
     assert.deepEqual(setup.overrides.addons, [custom])
     assert.equal(
       (await repository.connectAccounts(firstAuth, cached)).connections[0].account.id,

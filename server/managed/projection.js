@@ -5,6 +5,7 @@ import {
 } from '../../shared/addon-config.js'
 import { ManagedError } from './errors.js'
 import { applyAccountOverrides } from '../../shared/account-addons.js'
+import { isExpiryNotice } from '../../shared/expiry-notice.js'
 
 export function checkedCollection(value) {
   const result = parseAddonConfiguration(value)
@@ -89,9 +90,10 @@ export function projectManagedCollection({
   target,
   accountOverrides,
   individual = false,
+  expiryNotice = null,
 }) {
-  const retained = checkedCollection(saved)
-  const observed = checkedCollection(remote)
+  const retained = checkedCollection(saved).filter((addon) => !isExpiryNotice(addon))
+  const observed = checkedCollection(remote).filter((addon) => !isExpiryNotice(addon))
   const savedByUrl = new Map(retained.map((addon) => [identity(addon), addon]))
   if (target === 'suspended' || target === 'offboard') {
     // Capture previously unseen remote defaults before disabling them, without
@@ -100,7 +102,10 @@ export function projectManagedCollection({
       ...retained,
       ...observed.filter((addon) => !savedByUrl.has(identity(addon))),
     ])
-    return { configuration, expected: [] }
+    return {
+      configuration,
+      expected: target === 'suspended' && expiryNotice ? checkedCollection([expiryNotice]) : [],
+    }
   }
   if (target !== 'active' || typeof safeMode !== 'boolean') throw new ManagedError('INVALID_STATE')
   const combined = accountOverrides
@@ -166,6 +171,6 @@ export function projectManagedCollection({
       (a, b) => (positions.get(identity(a)) ?? Infinity) - (positions.get(identity(b)) ?? Infinity)
     )
   }
-  configuration = checkedCollection(configuration)
+  configuration = checkedCollection(configuration).filter((addon) => !isExpiryNotice(addon))
   return { configuration, expected: providerCollection(configuration) }
 }

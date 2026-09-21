@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readExpiryNotice, expiryNoticeAddon } from './expiry-notice.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { currentAccountTarget, observeSuspension } from './entitlement.js'
@@ -384,9 +385,23 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
         if (!matchesPolicy(job, account, timestamp)) return supersede(tx, job, account, timestamp)
         if (job.target === 'active' && !account.group_id && !account.addons_initialized)
           throw new ManagedError('INVALID_STATE')
-        // Suspension/offboarding must verify an empty *active* provider collection.
-        if (job.target !== 'active' && observed.length !== 0)
+        // Removal must be empty. Suspension permits only this owner's exact
+        // notice descriptor; no normal addon can be accepted as disabled.
+        if (job.target === 'offboard' && observed.length !== 0)
           throw new ManagedError('INVALID_STATE')
+        if (job.target === 'suspended') {
+          const settings = await tx.get('SELECT * FROM managed_owners WHERE owner_id = $1', [
+            account.owner_id,
+          ])
+          const notice = expiryNoticeAddon(readExpiryNotice(settings, crypto))
+          if (
+            !equalSecret(
+              collectionDigest(observed, account),
+              collectionDigest(notice ? [notice] : [], account)
+            )
+          )
+            throw new ManagedError('INVALID_STATE')
+        }
         if (executionPlan !== undefined) {
           const plan = checkedExecutionPlan(executionPlan)
           const policy = await readExecutionPolicy(tx, account, crypto, job.target)
