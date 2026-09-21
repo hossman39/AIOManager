@@ -20,6 +20,12 @@ key, and real Stremio transport. It ignores the existing database and encryption
 key environment settings. Each new manager starts with managed sync paused.
 Stop the foreground server with Ctrl+C; run `npm run managed:test` to reopen it.
 
+If an earlier testing build let you create a manager but adding a Stremio account
+reported **vault locked**, refresh the page and unlock with that same manager UUID
+and password. Login now initializes missing vault metadata after authenticating
+the existing identity. New manager passwords require at least 8 characters, and
+registration checks vault setup before reporting success.
+
 For a completely simulated walkthrough, `npm run managed:demo` prints a temporary
 URL and synthetic login. It seeds a group, two staged users and one expired user.
 Its provider and manifest transports are synthetic; it cannot contact Stremio.

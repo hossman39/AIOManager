@@ -34,6 +34,8 @@ function App() {
   const initializeFailover = useFailoverStore((state) => state.initialize)
   const startFailoverAutomation = useFailoverStore((state) => state.startAutomation)
   const isLocked = useAuthStore((state) => state.isLocked)
+  const encryptionKey = useAuthStore((state) => state.encryptionKey)
+  const isVaultReady = !isLocked && !!encryptionKey
   const [isInitialized, setIsInitialized] = useState(false)
 
   const { auth } = useSyncStore()
@@ -60,7 +62,7 @@ function App() {
 
   // Trigger sync when app unlocks to ensure parity
   useEffect(() => {
-    if (!isLocked && auth.isAuthenticated && isInitialized) {
+    if (isVaultReady && auth.isAuthenticated && isInitialized) {
       console.log('[App] Vault unlocked. Triggering fresh cloud pull.')
       // 1. Sync Cloud -> App (Pull latest changes)
       useSyncStore.getState().refreshFromCloud().then(() => {
@@ -68,7 +70,7 @@ function App() {
         useAccountStore.getState().syncAllAccounts()
       }).catch(console.error)
     }
-  }, [isLocked, auth.isAuthenticated, isInitialized])
+  }, [isVaultReady, auth.isAuthenticated, isInitialized])
 
   // Sync UUID to URL for easy bookmarking/sharing
   useEffect(() => {
@@ -146,7 +148,7 @@ function App() {
   // Bypass if visiting a Replay share link (stateless)
   const isShareLink = /^\/replay\/share\//.test(window.location.pathname)
 
-  if ((!auth.isAuthenticated || isLocked) && !isShareLink) {
+  if ((!auth.isAuthenticated || isLocked || !encryptionKey) && !isShareLink) {
     // Check for Deep Link (Parity with AIOStreams)
     // If user visits /account/<UUID> directly, we want to pre-fill that UUID
     const path = window.location.pathname

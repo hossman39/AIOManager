@@ -37,6 +37,7 @@ export function LoginPage() {
     const [regPass, setRegPass] = useState('')
     const [regPassConfirm, setRegPassConfirm] = useState('')
     const [isRegistering, setIsRegistering] = useState(false)
+    const [registrationError, setRegistrationError] = useState<string | null>(null)
 
     // Shared
     const [loading, setLoading] = useState(false)
@@ -65,6 +66,7 @@ export function LoginPage() {
     }, [searchParams])
 
     const handleRegister = async () => {
+        setRegistrationError(null)
         if (!regPass) {
             toast({ variant: "destructive", title: "Password Required", description: "Please choose a password." })
             return
@@ -72,6 +74,11 @@ export function LoginPage() {
 
         if (regPass !== regPassConfirm) {
             toast({ variant: "destructive", title: "Passwords Mismatch", description: "Please ensure both passwords match." })
+            return
+        }
+
+        if (regPass.length < 8) {
+            setRegistrationError('Password must be at least 8 characters.')
             return
         }
 
@@ -83,7 +90,7 @@ export function LoginPage() {
             setShowRegSuccess(true)
         } catch (e) {
             console.error("Registration error:", e)
-            // Toast handled in store
+            setRegistrationError(e instanceof Error ? e.message : 'Could not create your account. Please try again.')
         } finally {
             setIsRegistering(false)
         }
@@ -264,8 +271,9 @@ export function LoginPage() {
                                         </p>
                                     )}
                                     <p className="text-[11px] text-muted-foreground pt-1">
-                                        This password is the <strong>only key</strong> to your data. Do not lose it.
+                                        Use at least 8 characters. This password is the <strong>only key</strong> to your data. Do not lose it.
                                     </p>
+                                    {registrationError && <p role="alert" className="text-xs text-destructive">{registrationError}</p>}
                                 </div>
                             </CardContent>
                             <CardFooter>

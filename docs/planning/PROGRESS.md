@@ -6,6 +6,20 @@ been accessed or modified. Branch checkpoints/CI do not authorize production rol
 
 ## Current testing increment
 
+The first account-add acceptance report exposed an upstream vault initialization
+bug: registration accepted a short password, claimed the remote identity, swallowed
+local setup failure, and opened the workspace without an encryption key. Fresh
+logins to identities without a salt could enter the same state. Registration now
+validates the password and publishes its actual new vault salt; setup failures
+propagate. The workspace requires a key, and authenticated login repairs missing
+metadata without resetting existing encrypted data. Silent unlock failures also
+stop sync. Nine store integration regressions pass, bringing the local suite to
+285 passing tests (105 PostgreSQL cases run separately in CI). Typecheck, lint and
+build pass. An isolated browser reproduced the old failure, then recovered the
+same kind of identity with its original password, added a synthetic Stremio account,
+and retained the account and key across reload. The local test server serves the
+updated assets; refresh and unlock with the existing manager credentials.
+
 Activation with first-sync review, native Stremio transport, deployment-wide writer
 ownership, legacy proxy/Autopilot gates, pause/resume, retries, login repair,
 scheduled expiry, recurring suspension checks, an Expired view, renewal and

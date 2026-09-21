@@ -9,7 +9,8 @@ import { useFailoverStore } from './failoverStore'
 import { useAuthStore } from './authStore'
 import { useVaultStore } from './vaultStore'
 import { toast } from '@/hooks/use-toast'
-import { deriveSyncToken } from '@/lib/crypto'
+import { deriveSyncToken, generateSalt } from '@/lib/crypto'
+import localforage from 'localforage'
 import { resilientFetch } from '@/lib/api-resilience'
 
 // Suppress toasts during initial boot to prevent React "state update on unmounted component" warnings
@@ -168,10 +169,11 @@ export const useSyncStore = create<SyncState>()(
                 // But to be safe/correct, let's write an empty init state.
 
                 try {
+                    if (password.length < 8) throw new Error('Password must be at least 8 characters')
                     const apiPath = baseUrl.startsWith('http') ? `${baseUrl}/api` : baseUrl
-                    const { loadSalt } = await import('@/lib/crypto')
-                    const salt = loadSalt()
-                    const saltBase64 = salt ? btoa(String.fromCharCode(...salt)) : undefined
+                    // Publish the same new salt that local encryption will use.
+                    const salt = generateSalt()
+                    const saltBase64 = btoa(String.fromCharCode(...salt))
 
                     const emptyState = {
                         accounts: [],
@@ -195,11 +197,7 @@ export const useSyncStore = create<SyncState>()(
 
                     // Parity Fix: Also initialize the local Master Password using the same password
                     // This ensures local storage (IndexedDB) encryption key is ready immediately.
-                    try {
-                        await useAuthStore.getState().setupMasterPassword(password)
-                    } catch (e) {
-                        console.error("Local password setup during sync registration failed:", e)
-                    }
+                    await useAuthStore.getState().setupMasterPassword(password, salt)
 
                     set({
                         auth: { id: newId, password, name, isAuthenticated: true },
@@ -308,16 +306,22 @@ export const useSyncStore = create<SyncState>()(
                         }
                     }
 
-                    if (saltToUse) {
-                        try {
-                            await useAuthStore.getState().unlockFromSync(password, saltToUse)
-                        } catch (e) {
-                            console.error("Failed to unlock from sync:", e)
-                            if (!isSilent) {
-                                throw new Error("Could not unlock app with this password. (Encryption Mismatch)")
-                            }
+                    if (!saltToUse) {
+                        // Older registration could create an identity without initializing
+                        // its vault. Repair only after server authentication, preserving any
+                        // existing local encrypted data that still needs its original salt.
+                        const [localAccounts, localVault] = await Promise.all([
+                            localforage.getItem<unknown>('stremio-manager:accounts'),
+                            localforage.getItem<unknown>('stremio-manager:key-vault'),
+                        ])
+                        if (localVault || (localAccounts && (!Array.isArray(localAccounts) || localAccounts.length > 0))) {
+                            throw new Error('Encryption metadata is missing for saved local data. Restore its original backup before continuing.')
                         }
+                        saltToUse = btoa(String.fromCharCode(...generateSalt()))
                     }
+                    // A successful login always includes a usable local encryption key.
+                    // Silent refresh must also stop if unlocking fails.
+                    await useAuthStore.getState().unlockFromSync(password, saltToUse)
 
                     // 2. Import Data: Timestamp Conflict Resolution
                     const localLastSync = get().lastSyncedAt
@@ -410,10 +414,16 @@ export const useSyncStore = create<SyncState>()(
                     set({
                         auth: { id, password, name: data.name || '', isAuthenticated: true },
                         lastSyncedAt: data.syncedAt || new Date().toISOString(),
+                        isInitialSyncCompleted: true,
                         lastSeenVersion: data.lastSeenVersion || get().lastSeenVersion
                     })
 
-                        ; (get() as any).addLogEntry({
+                    if (!data.salt) {
+                        // Persist recovered metadata through the normal encrypted sync.
+                        setTimeout(() => get().syncToRemote(true), 0)
+                    }
+
+                    (get() as any).addLogEntry({
                             type: remoteTime === 0 ? 'pull' : 'pull',
                             status: 'success',
                             message: `Fetched cloud state. Decision: ${decision}`,
@@ -459,8 +469,8 @@ export const useSyncStore = create<SyncState>()(
 
             syncToRemote: async (isAuto: boolean = false, isDebounced: boolean = false) => {
                 const { auth, serverUrl, isSyncing, isInitialSyncCompleted } = get()
-                const { isLocked } = useAuthStore.getState()
-                if (!auth.isAuthenticated || isSyncing || isLocked) return
+                const { isLocked, encryptionKey } = useAuthStore.getState()
+                if (!auth.isAuthenticated || isSyncing || isLocked || !encryptionKey) return
 
                 // SAFETY LOCK: If we haven't successfully synced FROM the cloud yet, 
                 // we are NOT allowed to sync TO the cloud. This prevents stale clients 
