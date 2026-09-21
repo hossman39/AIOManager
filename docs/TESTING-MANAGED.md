@@ -1,4 +1,4 @@
-# Managed users: testing candidate
+# Accounts: testing candidate
 
 This build supports group publication, personal addons, first-sync review and
 activation, selectable expiry timezones, automatic suspension, renewal, retry,
@@ -14,8 +14,8 @@ npm run build
 npm run managed:test
 ```
 
-Open <http://127.0.0.1:1611/managed>. Create a new manager login and keep its UUID
-and password. This instance uses `data/managed-test`, its own generated encryption
+Open <http://127.0.0.1:1611/>. Use your existing manager login, or create one and
+keep its UUID and password. This instance uses `data/managed-test`, its own generated encryption
 key, and real Stremio transport. It ignores the existing database and encryption
 key environment settings. Each new manager starts with managed sync paused.
 Stop the foreground server with Ctrl+C; run `npm run managed:test` to reopen it.
@@ -33,9 +33,13 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
 
 ## Acceptance walkthrough
 
-1. Import an AIOManager JSON export containing only the dedicated test accounts.
-   Include saved passwords. Preview and save the inactive users. Missing passwords
-   and conflicts appear as row notices; no Stremio account is created by import.
+1. Refresh and open **Accounts**. Previously added accounts connect automatically;
+   an account already imported appears only once. Use **Add Stremio Account** to
+   add a dedicated test account with its email and password. It appears in this
+   same list with membership, personal-addon and activation controls. There is no
+   export/import step. An older auth-key/OAuth account without a saved password
+   shows **Save email and password** to complete unattended management.
+   **Import from another installation** is only for migrating an external export.
 2. Create a group, add complete configured manifest URLs, and save and publish its
    draft. Select users in the inventory and assign the published group. Use
    **Personal addons** for account-specific additions and disabled preferences.
@@ -51,7 +55,7 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    personal addons and intentionally disabled entries are preserved. Pause and
    resume sync to check that pending work waits.
 6. Set one account's expiry a few minutes ahead, in the chosen timezone. After the
-   cutoff, check **Expired users**, the verified suspension status, and Android.
+   cutoff, check **Expired accounts**, the verified suspension status, and Android.
    Saved addon configuration and former group assignment must remain available.
    Expired accounts are rechecked about every five minutes, subject to backlog
    and provider availability. Ordinary active client edits are not periodically
@@ -61,7 +65,8 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
 8. On a disposable user, select **Clear addons and remove user**. The user should
    disappear only after an empty collection is read back from Stremio. A failure
    retains its credentials and offboarding status for retry. A removed provider
-   identity remains reserved to block writes from stale legacy state.
+   identity remains reserved to block writes from stale legacy state. Refresh the
+   browser and confirm the removed account does not return from an older cache.
 9. Restart this test instance and confirm accounts, timezones and status survive.
    Check the last encrypted-backup timestamp. For invalid sessions, **Repair saved
    login** verifies the password and the enrolled identity before saving it.

@@ -8,6 +8,7 @@ import { ManagedError } from './errors.js'
 import { createManagedJobStore, currentAccountTarget } from './jobs.js'
 import { createManagedGroupRepository } from './groups.js'
 import { createManagedOperations } from './operations.js'
+import { createManagedConnections } from './connections.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
@@ -151,6 +152,7 @@ export function createManagedRepository({
   }
 
   return Object.freeze({
+    ...createManagedConnections({ crypto, ownerTransaction, publicAccount }),
     ...createManagedOperations({
       db,
       crypto,

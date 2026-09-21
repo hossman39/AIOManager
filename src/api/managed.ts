@@ -71,6 +71,24 @@ const accountsSchema = z.object({
   accounts: z.array(accountSchema),
   nextCursor: z.uuid().nullable(),
 })
+const connectionsSchema = z.object({
+  connections: z.array(
+    z
+      .object({
+        localId: z.string(),
+        status: z.enum(['linked', 'removed', 'needs_credentials']),
+        account: accountSchema.nullable(),
+      })
+      .refine((row) => (row.status === 'linked') === (row.account !== null))
+  ),
+})
+export type AccountConnection = z.infer<typeof connectionsSchema>['connections'][number]
+export type AccountConnectionInput = {
+  localId: string
+  email?: string
+  name?: string
+  password?: string
+}
 const membershipResultSchema = z.object({
   account: accountSchema,
   jobId: z.uuid().nullable(),
@@ -495,6 +513,8 @@ export function createManagedApi({
         key,
         signal,
       }),
+    connectAccounts: (accounts: AccountConnectionInput[], signal?: AbortSignal) =>
+      request('/accounts/connect', connectionsSchema, { body: { accounts }, signal }),
     accounts: (after = '', signal?: AbortSignal, view: 'all' | 'expired' = 'all') =>
       request(
         `/accounts?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}${view === 'expired' ? '&view=expired' : ''}`,

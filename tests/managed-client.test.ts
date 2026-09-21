@@ -191,6 +191,50 @@ const publicAccount = {
   updatedAt: 1_790_000_000_100,
 }
 
+test('unified account connections authenticate and return no credential fields', async () => {
+  const candidate = {
+    localId: 'browser-id',
+    email: publicAccount.email,
+    name: 'Test account',
+    password: ' exact password ',
+  }
+  const api = createManagedApi({
+    ...auth,
+    fetch: async (url, options) => {
+      assert.equal(url, '/api/managed/accounts/connect')
+      assert.equal(options?.method, 'POST')
+      assert.equal(
+        new Headers(options?.headers).get('x-sync-password'),
+        await deriveSyncToken(auth.password)
+      )
+      assert.deepEqual(JSON.parse(options?.body as string), { accounts: [candidate] })
+      return reply({
+        connections: [
+          {
+            localId: candidate.localId,
+            status: 'linked',
+            account: { ...publicAccount, password: 'do-not-expose' },
+          },
+        ],
+      })
+    },
+  })
+  const result = await api.connectAccounts([candidate])
+  assert.equal(result.connections[0].account?.id, publicAccount.id)
+  assert.ok(!JSON.stringify(result).includes('do-not-expose'))
+})
+
+test('unified account connection rejects a linked response without an account', async () => {
+  const api = createManagedApi({
+    ...auth,
+    fetch: async () =>
+      reply({ connections: [{ localId: 'browser-id', status: 'linked', account: null }] }),
+  })
+  await assert.rejects(api.connectAccounts([{ localId: 'browser-id' }]), {
+    code: 'INVALID_RESPONSE',
+  })
+})
+
 const groupId = '071c61f8-5bb3-4072-8600-0d36cd7bd724'
 const deploymentId = '231b0d49-6a2c-4d75-9201-d4c942b69ad8'
 const jobId = '85e5b1bc-7810-4cff-b5ee-ab0f2cc2471b'

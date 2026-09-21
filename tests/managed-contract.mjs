@@ -48,6 +48,170 @@ export function managedStorageContract(prefix, options, fixture) {
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
 
   check(
+    'normal account connection creates one inactive account and preserves exact credentials',
+    async ({ db, repository, crypto }) => {
+      const input = {
+        accounts: [
+          { localId: 'existing-browser-id', ...syntheticAccount, name: 'My test account' },
+        ],
+      }
+      const first = (await repository.connectAccounts(firstAuth, input)).connections[0]
+      assert.equal(first.status, 'linked')
+      assert.equal(first.account.state, 'staged')
+      assert.equal(first.account.membershipType, 'unset')
+      assert.equal(first.account.groupId, null)
+      assert.equal(first.account.name, 'My test account')
+      const row = await db.get('SELECT * FROM managed_accounts WHERE id = $1', [first.account.id])
+      assert.equal(
+        crypto.open(row.credentials_enc, {
+          owner: firstAuth.owner,
+          id: row.id,
+          purpose: 'credentials',
+        }).password,
+        syntheticAccount.password
+      )
+      const replay = await repository.connectAccounts(firstAuth, input)
+      assert.deepEqual(replay.connections[0], first)
+      const otherDevice = await repository.connectAccounts(firstAuth, {
+        accounts: [
+          {
+            ...input.accounts[0],
+            localId: 'another-browser-id',
+            email: syntheticAccount.email.toLowerCase(),
+          },
+        ],
+      })
+      assert.equal(otherDevice.connections[0].account.id, first.account.id)
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 1)
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+      assert.ok(
+        !JSON.stringify(await db.query('SELECT * FROM managed_account_links')).includes(
+          syntheticAccount.password
+        )
+      )
+    }
+  )
+
+  check(
+    'connection finds an imported account without replacing its membership or saved login',
+    async ({ repository, db, crypto }) => {
+      const imported = await repository.stageImport(firstAuth, parsedAccounts(), randomUUID())
+      const id = imported.accounts[0].id
+      await repository.setMembership(
+        firstAuth,
+        id,
+        { expectedVersion: 1, mode: 'lifetime' },
+        randomUUID()
+      )
+      const connected = await repository.connectAccounts(firstAuth, {
+        accounts: [
+          {
+            localId: 'cached-account',
+            email: syntheticAccount.email,
+            password: 'Different old cached password',
+            name: 'Old name',
+          },
+        ],
+      })
+      assert.equal(connected.connections[0].account.id, id)
+      assert.equal(connected.connections[0].account.membershipType, 'lifetime')
+      assert.equal(connected.connections[0].account.version, 2)
+      const row = await db.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
+      assert.equal(
+        crypto.open(row.credentials_enc, { owner: firstAuth.owner, id, purpose: 'credentials' })
+          .password,
+        syntheticAccount.password
+      )
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 1)
+    }
+  )
+
+  check(
+    'accounts without saved credentials stay visible for completion without creating invalid server records',
+    async ({ repository, db }) => {
+      const input = { accounts: [{ localId: 'oauth-account', email: syntheticAccount.email }] }
+      assert.deepEqual((await repository.connectAccounts(firstAuth, input)).connections, [
+        { localId: 'oauth-account', status: 'needs_credentials', account: null },
+      ])
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 0)
+      input.accounts[0].password = syntheticAccount.password
+      assert.equal(
+        (await repository.connectAccounts(firstAuth, input)).connections[0].status,
+        'linked'
+      )
+      delete input.accounts[0].password
+      assert.equal(
+        (await repository.connectAccounts(firstAuth, input)).connections[0].status,
+        'linked'
+      )
+    }
+  )
+
+  check(
+    'account connections are owner scoped and cannot be rebound to a different email',
+    async ({ repository, db }) => {
+      const input = { accounts: [{ localId: 'same-cache-id', ...syntheticAccount }] }
+      const first = (await repository.connectAccounts(firstAuth, input)).connections[0].account
+      const second = (await repository.connectAccounts(secondAuth, input)).connections[0].account
+      assert.notEqual(first.id, second.id)
+      await assert.rejects(
+        repository.connectAccounts(firstAuth, {
+          accounts: [
+            {
+              localId: 'new-before-error',
+              email: 'another@example.invalid',
+              password: 'synthetic',
+            },
+            { ...input.accounts[0], email: 'different@example.invalid' },
+          ],
+        }),
+        { code: 'VERSION_CONFLICT' }
+      )
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 2)
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_account_links')).count, 2)
+      await assert.rejects(
+        repository.connectAccounts({ ...firstAuth, token: 'wrong-token' }, input),
+        { code: 'UNAUTHORIZED' }
+      )
+    }
+  )
+
+  check(
+    'removed account links reject resurrection by retries, stale browsers, or another cache ID',
+    async ({ repository, db }) => {
+      const input = { accounts: [{ localId: 'cached-before-removal', ...syntheticAccount }] }
+      const created = (await repository.connectAccounts(firstAuth, input)).connections[0].account
+      await db.run('DELETE FROM managed_accounts WHERE id = $1', [created.id])
+      assert.deepEqual((await repository.connectAccounts(firstAuth, input)).connections, [
+        { localId: input.accounts[0].localId, status: 'removed', account: null },
+      ])
+      input.accounts[0].localId = 'another-stale-browser'
+      assert.equal(
+        (await repository.connectAccounts(firstAuth, input)).connections[0].status,
+        'removed'
+      )
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 0)
+    }
+  )
+
+  check(
+    'connection payload validation rejects duplicate cache IDs and never accepts addon or token fields',
+    async ({ repository, db }) => {
+      const candidate = { localId: 'cache-id', ...syntheticAccount }
+      for (const accounts of [
+        [candidate, candidate],
+        [{ ...candidate, authKey: 'not-uploaded' }],
+        [{ ...candidate, addons: [] }],
+        [{ ...candidate, email: 'invalid' }],
+      ])
+        await assert.rejects(repository.connectAccounts(firstAuth, { accounts }), {
+          code: 'INVALID_INPUT',
+        })
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 0)
+    }
+  )
+
+  check(
     'numbered migrations are repeatable and changed/newer history fails closed',
     async ({ db }) => {
       await migrateManagedSchema(db)

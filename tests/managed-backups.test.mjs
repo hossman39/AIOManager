@@ -34,6 +34,13 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     const s = await prepareManagedFixture(source)
     const staged = await s.repository.stageImport(firstAuth, parsedAccounts(), randomUUID())
     const id = staged.accounts[0].id
+    const cached = {
+      accounts: [{ localId: 'backup-cache-account', email: 'Person@example.invalid' }],
+    }
+    assert.equal(
+      (await s.repository.connectAccounts(firstAuth, cached)).connections[0].account.id,
+      id
+    )
     await s.repository.setMembership(
       firstAuth,
       id,
@@ -78,6 +85,11 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     const account = await repository.getAccount(firstAuth, id)
     assert.equal(account.expiry.timezone, 'Europe/Paris')
     assert.equal(account.email, 'Person@example.invalid')
+    assert.equal(
+      (await repository.connectAccounts(firstAuth, cached)).connections[0].account.id,
+      id
+    )
+    assert.equal((await restored.get('SELECT COUNT(*) AS count FROM managed_accounts')).count, 1)
     assert.equal((await restored.get('SELECT write_paused FROM managed_metadata')).write_paused, 1)
     assert.equal(
       (await restored.get('SELECT write_paused FROM managed_owners LIMIT 1')).write_paused,

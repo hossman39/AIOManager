@@ -43,6 +43,18 @@ test('authenticated HTTP lifecycle enforces first-sync review, expiry, legacy ga
     )
     const id = staged.accounts[0].id,
       base = `/api/managed/accounts/${id}`
+    const connectionInput = {
+      accounts: [
+        {
+          localId: 'synthetic-cache-id',
+          email: 'synthetic@example.invalid',
+          password: 'synthetic-password',
+        },
+      ],
+    }
+    const connected = await post('/api/managed/accounts/connect', connectionInput)
+    assert.equal(connected.connections[0].account.id, id)
+    assert.equal(fake.calls.length, 0)
     const group = (
       await post('/api/managed/groups', {
         name: 'Synthetic group',
@@ -118,6 +130,15 @@ test('authenticated HTTP lifecycle enforces first-sync review, expiry, legacy ga
     assert.equal(removed.json().account, null)
     assert.ok(removed.json().removedAt)
     assert.equal((await app.inject({ method: 'GET', url: base, headers })).statusCode, 404)
+    const afterRemoval = await post('/api/managed/accounts/connect', connectionInput)
+    assert.deepEqual(afterRemoval.connections, [
+      { localId: 'synthetic-cache-id', status: 'removed', account: null },
+    ])
+    assert.equal(
+      (await app.inject({ method: 'GET', url: '/api/managed/accounts', headers })).json().accounts
+        .length,
+      0
+    )
     assert.ok(fake.calls.every((call) => !JSON.stringify(call.body).includes('Register')))
   } finally {
     await app?.close()

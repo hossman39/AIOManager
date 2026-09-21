@@ -1,10 +1,25 @@
 # Implementation progress
 
-Updated 2026-09-20. The managed runtime is now connected in an isolated testing
+Updated 2026-09-21. The managed runtime is now connected in an isolated testing
 candidate. No paying accounts, production database, or production deployment has
 been accessed or modified. Branch checkpoints/CI do not authorize production rollout.
 
 ## Current testing increment
+
+Accounts is now the single account workspace. Existing browser accounts connect
+automatically to their server records by owner and email; normal account addition
+uses the same path. Existing managed settings and saved credentials are preserved.
+Accounts lacking saved credentials stay visible with a completion action. The
+separate Managed users tab is removed, and old links redirect to Accounts.
+External import is optional; no export/import round trip is required.
+
+Migration 6 retains encrypted-identity lookup links after verified removal, so
+stale browser copies cannot recreate an account. The client also removes those
+copies and their old automation rules. Backups include the links. Connection
+alone never activates an account or queues provider work. The suite now passes
+296 local tests, with 111 PostgreSQL cases reserved for hosted CI; typecheck,
+lint and the production build pass. Browser upgrade testing confirms an old
+account and its imported counterpart become one row with existing settings.
 
 The first account-add acceptance report exposed an upstream vault initialization
 bug: registration accepted a short password, claimed the remote identity, swallowed

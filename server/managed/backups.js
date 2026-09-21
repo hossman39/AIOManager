@@ -33,6 +33,7 @@ const tables = [
   'managed_audit',
   'managed_offboarded',
   'managed_job_history',
+  'managed_account_links',
 ]
 const history = () =>
   managedMigrations.map((migration) => ({

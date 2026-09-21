@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSyncStore } from '@/store/syncStore'
 import { useFailoverStore } from '@/store/failoverStore'
-import { LogOut, LayoutDashboard, Package, Activity, BarChart3, Settings, HelpCircle, Zap, ZapOff, ShieldCheck, ExternalLink, UsersRound } from 'lucide-react'
+import { LogOut, LayoutDashboard, Package, Activity, BarChart3, Settings, HelpCircle, Zap, ZapOff, ShieldCheck, ExternalLink } from 'lucide-react'
 import { SyncStatus } from '@/components/SyncStatus'
 import { useGuardedLeave } from '@/components/common/UnsavedWorkGuard'
 import { useVaultStore } from '@/store/vaultStore'
@@ -246,10 +246,6 @@ export function Header() {
         </div>
         {/* Desktop Navigation Tabs */}
         <div className="hidden md:flex gap-1 mt-4 border-b overflow-x-auto scrollbar-hide whitespace-nowrap -mx-4 px-4 sm:mx-0 sm:px-0">
-          <Link to="/managed" className={`pb-2 px-3 border-b-2 transition-colors shrink-0 flex items-center gap-2 ${location.pathname === '/managed' ? 'border-primary text-foreground font-semibold' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            <UsersRound className="h-3.5 w-3.5" />
-            <span className="text-[13px]">Managed users</span>
-          </Link>
           <Link
             to="/"
             className={`pb-2 px-3 border-b-2 transition-colors duration-150 shrink-0 flex items-center gap-2 ${location.pathname === '/' || location.pathname.startsWith('/account/')
@@ -333,7 +329,6 @@ export function Header() {
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur-lg border-t border-border flex items-center justify-around min-h-[76px] pb-[calc(env(safe-area-inset-bottom,0px)+8px)] shadow-[0_-10px_40px_rgba(0,0,0,0.15)]">
         {[
           { to: '/', icon: LayoutDashboard, label: 'Accounts' },
-          { to: '/managed', icon: UsersRound, label: 'Managed' },
           { to: '/saved-addons', icon: Package, label: 'Addons' },
           { to: '/activity', icon: Activity, label: 'Activity' },
           { to: '/metrics', icon: BarChart3, label: 'Metrics' },

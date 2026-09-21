@@ -205,6 +205,19 @@ CREATE TABLE managed_job_history (
 CREATE INDEX managed_accounts_suspension_check ON managed_accounts (suspension_check_at, id)
   WHERE state = 'active' AND suspended_at IS NOT NULL;`,
   }),
+  Object.freeze({
+    version: 6,
+    name: 'unified-account-links',
+    sql: `CREATE TABLE managed_account_links (
+  owner_id TEXT NOT NULL REFERENCES managed_owners(owner_id),
+  local_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  email_key TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  PRIMARY KEY (owner_id, local_id)
+);
+CREATE INDEX managed_account_links_email ON managed_account_links (owner_id, email_key);`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

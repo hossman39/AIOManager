@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, ShieldCheck, Upload, UsersRound } from 'lucide-react'
+import { Plus, RefreshCw, ShieldCheck, Upload, UsersRound } from 'lucide-react'
 import {
   createManagedApi,
   ManagedApiError,
@@ -20,6 +20,8 @@ import { ManagedPersonalEditor } from '@/components/managed/ManagedPersonalEdito
 import { ManagedRuntimeControls } from '@/components/managed/ManagedRuntimeControls'
 import { ManagedAccountOperations } from '@/components/managed/ManagedAccountOperations'
 import { useUnsavedWarning } from '@/components/common/UnsavedWorkGuard'
+import { useUIStore } from '@/store/uiStore'
+import { useAccountConnections } from '@/components/managed/useAccountConnections'
 
 type ManagedApi = ReturnType<typeof createManagedApi>
 const describeError = (error: unknown) =>
@@ -29,17 +31,20 @@ const describeError = (error: unknown) =>
 const isCancelled = (error: unknown) =>
   error instanceof ManagedApiError && error.code === 'CANCELLED'
 
-export function ManagedAccountsPage() {
+export function ManagedAccountsPage({ focusAccountId }: { focusAccountId?: string } = {}) {
   const auth = useSyncStore((state) => state.auth)
   const serverUrl = useSyncStore((state) => state.serverUrl)
   const api = useMemo(
     () => createManagedApi({ managerId: auth.id, password: auth.password, serverUrl }),
     [auth.id, auth.password, serverUrl]
   )
-  return <ManagedWorkspace key={`${auth.id}:${serverUrl}`} api={api} />
+  return (
+    <ManagedWorkspace key={`${auth.id}:${serverUrl}`} api={api} focusAccountId={focusAccountId} />
+  )
 }
 
-function ManagedWorkspace({ api }: { api: ManagedApi }) {
+function ManagedWorkspace({ api, focusAccountId }: { api: ManagedApi; focusAccountId?: string }) {
+  const openAddAccount = useUIStore((state) => state.openAddAccountDialog)
   const [accounts, setAccounts] = useState<ManagedAccount[]>([])
   const [status, setStatus] = useState<ManagedStatus | null>(null)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -61,6 +66,8 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
   const [personalAccount, setPersonalAccount] = useState<ManagedAccount | null>(null)
   const [operationsAccount, setOperationsAccount] = useState<ManagedAccount | null>(null)
   const [view, setView] = useState<'all' | 'expired'>('all')
+  const [showImport, setShowImport] = useState(false)
+  const [removedIds, setRemovedIds] = useState<string[]>([])
   const returnFocus = useRef<HTMLButtonElement | null>(null)
   const restoreFocus = useRef(false)
   // Passwords stay in this transient ref, never in legacy stores/localStorage or
@@ -121,6 +128,39 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
     pending.current = null
   }, [])
 
+  const connected = useAccountConnections(api, () => {
+    void loadInventory()
+  })
+  const inventory = [...accounts]
+  if (view === 'all') {
+    for (const connection of connected.connections) {
+      if (connection.account && !inventory.some((row) => row.id === connection.account!.id))
+        inventory.push(connection.account)
+    }
+  }
+  const availableAccounts = inventory.filter((row) => !removedIds.includes(row.id))
+  const pendingAccounts =
+    view === 'all'
+      ? connected.localAccounts.filter((local) => {
+          const link = connected.connections.find((row) => row.localId === local.id)
+          return (
+            (!link || link.status === 'needs_credentials') &&
+            !availableAccounts.some((row) => row.email.toLowerCase() === local.email?.toLowerCase())
+          )
+        })
+      : []
+  const focusedAccount = availableAccounts.find(
+    (row) =>
+      row.id === focusAccountId ||
+      connected.connections.some(
+        (link) => link.localId === focusAccountId && link.account?.id === row.id
+      )
+  )
+  const focusedEmail = focusedAccount?.email
+  useEffect(() => {
+    if (focusedEmail) setSearch(focusedEmail)
+  }, [focusAccountId, focusedEmail])
+
   useEffect(() => {
     setEditingAccount(null)
     setMembershipNotice('')
@@ -149,9 +189,11 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
 
   const replaceAccount = (updated: ManagedAccount) => {
     setAccounts((previous) =>
-      previous.map((row) =>
-        row.id === updated.id && row.version <= updated.version ? updated : row
-      )
+      !previous.some((row) => row.id === updated.id)
+        ? [...previous, updated]
+        : previous.map((row) =>
+            row.id === updated.id && row.version <= updated.version ? updated : row
+          )
     )
   }
 
@@ -238,7 +280,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
     }
   }
 
-  const shownAccounts = accounts.filter((account) =>
+  const shownAccounts = availableAccounts.filter((account) =>
     `${account.email} ${account.name}`.toLowerCase().includes(search.toLowerCase())
   )
   const readyCount = preview?.accounts.filter((account) => account.status === 'ready').length ?? 0
@@ -251,16 +293,28 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 text-2xl font-semibold">
-            <UsersRound aria-hidden="true" /> Managed users
+            <UsersRound aria-hidden="true" /> Accounts
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage group addons, individual setups, memberships, and verified sync.
           </p>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm">
-          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-          {status?.capabilities.providerWrites ? 'Managed sync available' : 'Staging available'}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => openAddAccount()}>
+            <Plus aria-hidden="true" /> Add Stremio Account
+          </Button>
+          <Button
+            variant="outline"
+            aria-expanded={showImport}
+            onClick={() => setShowImport((value) => !value)}
+          >
+            Import from another installation
+          </Button>
+          <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm">
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            {status?.capabilities.providerWrites ? 'Managed sync available' : 'Staging available'}
+          </span>
+        </div>
       </div>
       {status && (
         <ManagedRuntimeControls
@@ -273,17 +327,18 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
       )}
 
       <section
+        hidden={!showImport}
         className="space-y-4 rounded-xl border bg-card p-5"
         aria-labelledby="managed-import-heading"
       >
         <div>
           <h3 id="managed-import-heading" className="text-lg font-semibold">
-            1. Preview a credential-only import
+            Import accounts from another installation
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Export JSON from AIOManager Settings with saved credentials included. Only email and
-            password are uploaded; addons, tokens, names, dates, and automation rules are discarded.
-            Passwords are never shown here.
+            Select an export from your old AIOManager installation with saved credentials included.
+            Only email and password are uploaded; addons, tokens, names, dates, and automation rules
+            are discarded. Passwords are never shown here.
           </p>
         </div>
         <label className="block space-y-2 text-sm font-medium" htmlFor="managed-import-file">
@@ -456,7 +511,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 id="managed-inventory-heading" className="text-lg font-semibold">
-              Saved user inventory
+              Your accounts
             </h3>
             <p className="text-sm text-muted-foreground">
               {status
@@ -466,8 +521,9 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
           </div>
           <Button
             variant="outline"
-            disabled={loading || assignmentLocked || selectedIds.length > 0}
+            disabled={loading || connected.busy || assignmentLocked || selectedIds.length > 0}
             onClick={() => {
+              connected.refresh()
               void loadInventory()
             }}
           >
@@ -480,8 +536,21 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
             {inventoryError}
           </p>
         )}
+        {connected.busy && (
+          <p role="status" className="text-sm text-muted-foreground">
+            Finishing account setup…
+          </p>
+        )}
+        {connected.error && (
+          <div role="alert" className="space-y-2 text-sm text-destructive">
+            <p>{connected.error}</p>
+            <Button variant="outline" onClick={connected.refresh}>
+              Retry account setup
+            </Button>
+          </div>
+        )}
         <label htmlFor="managed-user-search" className="block text-sm">
-          Search loaded users
+          Search accounts
         </label>
         <input
           id="managed-user-search"
@@ -505,8 +574,8 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
             className="rounded-md border bg-background px-3 py-2"
             onChange={(event) => setView(event.target.value as 'all' | 'expired')}
           >
-            <option value="all">All managed users</option>
-            <option value="expired">Expired users</option>
+            <option value="all">All accounts</option>
+            <option value="expired">Expired accounts</option>
           </select>
         </label>
         {view === 'expired' && (
@@ -522,7 +591,7 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
         )}
         {selectedIds.length > 0 && (
           <ManagedGroupAssignment
-            accounts={accounts.filter((account) => selectedIds.includes(account.id))}
+            accounts={availableAccounts.filter((account) => selectedIds.includes(account.id))}
             groups={groups}
             api={api}
             onLock={setAssignmentLocked}
@@ -547,6 +616,8 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
             paused={status?.writePaused ?? true}
             onUpdated={replaceAccount}
             onRemoved={() => {
+              setRemovedIds((previous) => [...previous, operationsAccount.id])
+              connected.refresh()
               setOperationsAccount(null)
               restoreFocus.current = true
               setMembershipNotice(
@@ -600,7 +671,9 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
         )}
         <div className="overflow-x-auto rounded border" aria-busy={loading}>
           <table className="w-full text-left text-sm">
-            <caption className="sr-only">Users saved in managed storage</caption>
+            <caption className="sr-only">
+              Stremio accounts and their group, membership, and sync settings
+            </caption>
             <thead className="bg-muted">
               <tr>
                 <th scope="col" className="p-3">
@@ -649,6 +722,40 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
               </tr>
             </thead>
             <tbody>
+              {pendingAccounts
+                .filter((account) =>
+                  `${account.email ?? ''} ${account.name}`
+                    .toLowerCase()
+                    .includes(search.toLowerCase())
+                )
+                .map((account) => (
+                  <tr key={`local:${account.id}`} className="border-t">
+                    <td className="p-3" />
+                    <td className="break-all p-3">{account.email || account.name}</td>
+                    <td className="p-3">
+                      {connected.busy || connected.waiting
+                        ? 'Preparing account…'
+                        : connected.connections.some(
+                              (row) =>
+                                row.localId === account.id && row.status === 'needs_credentials'
+                            )
+                          ? 'Saved login needed'
+                          : 'Setup pending'}
+                    </td>
+                    <td className="p-3">Unassigned</td>
+                    <td className="p-3">Not set</td>
+                    <td className="p-3">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={connected.busy || connected.waiting}
+                        onClick={() => openAddAccount(account)}
+                      >
+                        Save email and password
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
               {shownAccounts.map((account) => (
                 <tr key={account.id} className="border-t">
                   <td className="p-3">
@@ -673,10 +780,15 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
                       }
                     />
                   </td>
-                  <td className="break-all p-3">{account.email}</td>
+                  <td className="break-all p-3">
+                    {account.email}
+                    {account.name !== account.email && (
+                      <p className="text-xs text-muted-foreground">{account.name}</p>
+                    )}
+                  </td>
                   <td className="p-3">
                     {account.state === 'staged'
-                      ? 'Staged — no changes'
+                      ? 'Needs setup'
                       : account.state === 'offboarding'
                         ? 'Offboarding'
                         : account.expired
@@ -775,18 +887,18 @@ function ManagedWorkspace({ api }: { api: ManagedApi }) {
               ))}
             </tbody>
           </table>
-          {!loading && shownAccounts.length === 0 && (
+          {!loading && shownAccounts.length === 0 && pendingAccounts.length === 0 && (
             <p className="p-4 text-sm text-muted-foreground">
               {view === 'expired'
                 ? 'No expired users match this view.'
                 : accounts.length
                   ? 'No loaded users match this search.'
-                  : 'No managed users saved yet. Preview an export above to get started.'}
+                  : 'No accounts yet. Add a Stremio account to get started.'}
             </p>
           )}
           {loading && accounts.length === 0 && (
             <p role="status" className="p-4 text-sm">
-              Loading users…
+              Loading accounts…
             </p>
           )}
         </div>

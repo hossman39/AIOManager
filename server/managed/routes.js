@@ -79,6 +79,9 @@ export async function registerManagedRoutes(app, repository, manifestService) {
         })
       })
       routes.get('/status', (request) => repository.status(request.managedAuth))
+      routes.post('/accounts/connect', { bodyLimit: 1024 * 1024 }, (request) =>
+        repository.connectAccounts(request.managedAuth, request.body)
+      )
       routes.post('/settings', { bodyLimit: 4096 }, (request) =>
         repository.setSettings(
           request.managedAuth,

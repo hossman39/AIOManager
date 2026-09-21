@@ -36,6 +36,12 @@ further routine confirmations. Production rollout remains separate from testing.
 
 ## Implementation details derived from those decisions
 
+- Accounts and managed users are one inventory. Adding or creating a Stremio
+  account connects its saved login to group, membership and sync controls in the
+  same row. Existing accounts connect automatically without an export/import
+  round trip. External migration remains optional. New accounts stay inactive
+  until their first-sync review and explicit activation. Verified removal must
+  also prevent older browser copies from recreating the account.
 - Personal addons are explicit account configuration, not automatically inferred from ignored migration data. Publishing a group must not erase those additions. The same addon ID can appear with multiple configured URLs.
 - Preserve group order and a separate personal-addon order. Default personal entries to follow the group; retain the existing UI's supported reorder capabilities when wiring the editor. Conflicting edits/duplicate exact URLs must be visible, not silently assigned another credential.
 - Initial provisioning, explicit sync, group publication, expiry, renewal, and cleanup jobs are durable. Automatic retries recover a requested change; there is no new blanket periodic group-drift rewrite.

@@ -1,5 +1,5 @@
-import { AccountList } from '@/components/accounts/AccountList'
+import { ManagedAccountsPage } from './ManagedAccountsPage'
 
 export function AccountsPage() {
-  return <AccountList />
+  return <ManagedAccountsPage />
 }
