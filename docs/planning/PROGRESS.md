@@ -40,6 +40,18 @@ account's Stremio identity and email, and four installed addons (AIOMetadata,
 Cinemeta, OpenSubtitles v3 and Streams). The second account was still staged.
 At that check the first account had been renewed. Device-side display/cache has
 not been verified; no real Stremio account was changed by the diagnostic reads.
+The local test instance now runs migration 8 with the original database/key and
+serves `index-DJMCF_LS.js` on port 1611. The page, script, stylesheet and new notice
+settings endpoint return 200. A native API read after restart confirms the four
+installed addons match the saved setup. Notice display remains opt-in until its
+reachable installation URL is configured. Both the account view and notice form
+fit a 390px viewport without horizontal overflow; no browser console errors were
+reported. A pre-upgrade encrypted SQLite copy is retained outside version control.
+Code checkpoint `8c3f721` passed all five hosted checks in
+[run 35669330115](https://github.com/hossman39/AIOManager/actions/runs/35669330115):
+315 tests on both Windows and Linux, all 117 PostgreSQL contracts, and AMD64/ARM64
+container checks. The local writer's scan is current and no pending/retrying work
+was left by this update.
 
 ## Earlier individual-account checkpoint
 
