@@ -34,6 +34,13 @@ complete accounts with no known email. Two store regressions cover successful
 completion, unchanged credentials on a rename, and a rejected login leaving the
 original account intact. A dropped connection response is recoverable with Retry
 account setup and creates no duplicate account.
+Final code checkpoint `596b125` passed all five hosted jobs in
+[run 35656501764](https://github.com/hossman39/AIOManager/actions/runs/35656501764):
+298 tests on Windows/Linux, all 111 PostgreSQL cases, and AMD64/ARM64 container
+checks. The final browser rehearsal completes an auth-key account in the same
+row and retains its saved login across reload; opening its next editor clears
+the completed membership notice. The local test server is healthy on port 1611
+with migration 6 and the final assets, using its existing database and key.
 
 The first account-add acceptance report exposed an upstream vault initialization
 bug: registration accepted a short password, claimed the remote identity, swallowed
