@@ -4,6 +4,8 @@ import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { currentAccountTarget, observeSuspension } from './entitlement.js'
 import { readExecutionPolicy, checkedExecutionPlan } from './execution.js'
+import { projectManagedCollection } from './projection.js'
+import { stremioCollection } from './stremio.js'
 export { currentAccountTarget } from './entitlement.js'
 
 const causes = new Set([
@@ -385,8 +387,12 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
         if (!matchesPolicy(job, account, timestamp)) return supersede(tx, job, account, timestamp)
         if (job.target === 'active' && !account.group_id && !account.addons_initialized)
           throw new ManagedError('INVALID_STATE')
-        // Removal must be empty. Suspension permits only this owner's exact
-        // notice descriptor; no normal addon can be accepted as disabled.
+        const plan = executionPlan === undefined ? null : checkedExecutionPlan(executionPlan)
+        const policy = plan ? await readExecutionPolicy(tx, account, crypto, job.target) : null
+        if (plan && !equalSecret(policy.stamp, plan.stamp))
+          return reschedulePolicy(tx, job, account, timestamp)
+        // Removal must be empty. Expiry permits only the published keep choices
+        // and this owner's notice; a matching readback alone is not sufficient.
         if (job.target === 'offboard' && observed.length !== 0)
           throw new ManagedError('INVALID_STATE')
         if (job.target === 'suspended') {
@@ -394,19 +400,30 @@ export function createManagedJobStore({ db, crypto, now = Date.now, leaseMs = 12
             account.owner_id,
           ])
           const notice = expiryNoticeAddon(readExpiryNotice(settings, crypto))
+          const allowed = policy
+            ? projectManagedCollection({
+                ...policy,
+                saved: plan.configuration,
+                remote: plan.configuration,
+              }).expected
+            : notice
+              ? [notice]
+              : []
+          // The execution plan/readback comparison enforces exact order. Here
+          // validate policy independently of the pre-write remote anchor order.
+          const ordered = (addons) =>
+            [...addons].sort((a, b) => a.transportUrl.localeCompare(b.transportUrl))
+          const observedDigest = collectionDigest(ordered(observed), account)
           if (
+            !equalSecret(observedDigest, collectionDigest(ordered(allowed), account)) &&
             !equalSecret(
-              collectionDigest(observed, account),
-              collectionDigest(notice ? [notice] : [], account)
+              observedDigest,
+              collectionDigest(ordered(stremioCollection(allowed)), account)
             )
           )
             throw new ManagedError('INVALID_STATE')
         }
-        if (executionPlan !== undefined) {
-          const plan = checkedExecutionPlan(executionPlan)
-          const policy = await readExecutionPolicy(tx, account, crypto, job.target)
-          if (!equalSecret(policy.stamp, plan.stamp))
-            return reschedulePolicy(tx, job, account, timestamp)
+        if (plan) {
           if (
             !equalSecret(
               collectionDigest(plan.expected, account),

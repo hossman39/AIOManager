@@ -33,11 +33,20 @@ export async function readExecutionPolicy(tx, account, crypto, target) {
     safeMode = true,
     revision = null,
     accountOverrides = emptyAccountOverrides(),
-    individual = !account.group_id
-  if (target === 'active') {
-    if (individual && !account.addons_initialized) throw new ManagedError('INVALID_STATE')
-    const setup = await readAccountSetup(tx, account, crypto, { publishedOnly: true })
-    ;({ group, personal, safeMode, revision, accountOverrides } = setup)
+    individual = !account.group_id,
+    expirySetupAvailable = false
+  if (target === 'active' || target === 'suspended') {
+    try {
+      if (individual && !account.addons_initialized) throw new ManagedError('INVALID_STATE')
+      const setup = await readAccountSetup(tx, account, crypto, { publishedOnly: true })
+      ;({ group, personal, safeMode, revision, accountOverrides } = setup)
+      expirySetupAvailable = true
+    } catch (error) {
+      // An unreadable setup must still allow expiry to remove access. Never
+      // infer permission to keep addons from a damaged or unpublished policy.
+      if (target !== 'suspended' || !['INVALID_STATE', 'DATA_UNREADABLE'].includes(error.code))
+        throw error
+    }
   }
   const expiryNotice = expiryNoticeAddon(
     readExpiryNotice(
@@ -56,6 +65,7 @@ export async function readExecutionPolicy(tx, account, crypto, target) {
       accountOverrides,
       individual,
       expiryNotice,
+      expirySetupAvailable,
     },
     binding('execution-policy')
   )
@@ -70,6 +80,7 @@ export async function readExecutionPolicy(tx, account, crypto, target) {
     accountOverrides,
     individual,
     expiryNotice,
+    expirySetupAvailable,
   }
 }
 

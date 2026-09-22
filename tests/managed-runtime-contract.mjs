@@ -87,6 +87,209 @@ export function managedRuntimeContract(prefix, options, fixture) {
       }
     })
   check(
+    'selective expiry preserves browsing and subtitles, repairs stream drift, and survives group deletion, renewal and removal',
+    async (s) => {
+      const addon = (name, resources, flags) => ({
+        transportUrl: `https://addons.example.invalid/${name}/manifest.json`,
+        manifest: {
+          id: name,
+          name,
+          version: '1.0.0',
+          types: ['movie', 'series'],
+          resources,
+          catalogs: [{ id: name, type: 'movie' }],
+        },
+        flags: { enabled: true, ...flags },
+      })
+      const cinema = addon('Cinemeta', ['catalog', 'meta'], {
+        protected: true,
+        disableOnExpiry: false,
+      })
+      const subtitles = addon('Subtitles', ['subtitles'], { disableOnExpiry: false })
+      const stream = addon('Streams', ['stream'], { protected: true, disableOnExpiry: true })
+      const disabled = addon('SwitchedOff', ['catalog'], { enabled: false, disableOnExpiry: false })
+      let group = await s.repository.getGroup(firstAuth, s.group.id)
+      await s.repository.saveGroupDraft(
+        firstAuth,
+        group.id,
+        {
+          expectedVersion: group.version,
+          name: group.name,
+          safeMode: true,
+          addons: [cinema, subtitles, stream, disabled],
+        },
+        randomUUID()
+      )
+      await s.publish()
+      s.user.addons = stremioCollection([cinema])
+      await s.repository.saveExpiryNotice(
+        firstAuth,
+        {
+          expectedVersion: (await s.repository.status(firstAuth)).version,
+          settings: {
+            ...defaultExpiryNotice,
+            enabled: true,
+            baseUrl: 'https://manager.example.invalid',
+          },
+        },
+        randomUUID()
+      )
+      await s.activate()
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      const original = structuredClone(s.user.addons)
+      let account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        {
+          expectedVersion: account.version,
+          mode: 'term',
+          local: '2020-01-01T12:00',
+          timezone: 'America/New_York',
+        },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      const expectedIds = ['Cinemeta', 'Subtitles', EXPIRY_NOTICE_ADDON_ID]
+      assert.deepEqual(
+        s.user.addons.map((addon) => addon.manifest.id),
+        expectedIds
+      )
+      assert.ok(s.user.addons[0].manifest.resources.includes('meta'))
+      let view = await s.repository.getAccountAddons(firstAuth, s.id, { live: true })
+      assert.equal(view.expiryMatchesInstalled, true)
+      assert.equal(view.savedMatchesInstalled, false)
+      assert.ok(
+        view.addons.find((addon) => addon.manifest.id === 'SwitchedOff').flags.enabled === false
+      )
+      s.user.addons.push(...stremioCollection([stream]))
+      view = await s.repository.getAccountAddons(firstAuth, s.id, { live: true })
+      assert.equal(view.expiryMatchesInstalled, false)
+      s.advance(300_001)
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(
+        s.user.addons.map((addon) => addon.manifest.id),
+        expectedIds
+      )
+      group = await s.repository.getGroup(firstAuth, s.group.id)
+      await s.repository.deleteGroup(
+        firstAuth,
+        group.id,
+        { expectedVersion: group.version },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(
+        s.user.addons.map((addon) => addon.manifest.id),
+        expectedIds
+      )
+      account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        { expectedVersion: account.version, mode: 'lifetime' },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, original)
+      account = await s.repository.getAccount(firstAuth, s.id)
+      await s.repository.requestSync(
+        firstAuth,
+        s.id,
+        { expectedVersion: account.version },
+        randomUUID(),
+        true
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+    }
+  )
+  check(
+    'expiry-only group publications update expired accounts despite individual customizations; drafts remain passive',
+    async (s) => {
+      await s.activate()
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      let view = await s.repository.getAccountAddons(firstAuth, s.id)
+      const custom = {
+        ...view.addons[0],
+        flags: { ...view.addons[0].flags, disableOnExpiry: false },
+        metadata: { customName: 'My individual name' },
+      }
+      const saved = await s.repository.setAccountAddons(
+        firstAuth,
+        s.id,
+        {
+          expectedVersion: view.account.version,
+          groupVersion: view.groupVersion,
+          addons: [custom],
+        },
+        randomUUID()
+      )
+      // Account customization cannot silently override the group's expiry choice.
+      assert.notEqual(saved.addons[0].flags.disableOnExpiry, false)
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        {
+          expectedVersion: saved.account.version,
+          mode: 'term',
+          local: '2020-01-01T12:00',
+        },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+      let group = await s.repository.getGroup(firstAuth, s.group.id)
+      await s.repository.saveGroupDraft(
+        firstAuth,
+        group.id,
+        {
+          expectedVersion: group.version,
+          name: group.name,
+          safeMode: group.safeMode,
+          addons: group.draft.map((addon) => ({
+            ...addon,
+            flags: { ...addon.flags, disableOnExpiry: false },
+          })),
+        },
+        randomUUID()
+      )
+      s.advance(300_001)
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+      const publication = await s.publish()
+      assert.equal(publication.unchanged, false)
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.equal(s.user.addons[0].manifest.name, 'My individual name')
+      view = await s.repository.getAccountAddons(firstAuth, s.id, { live: true })
+      assert.equal(view.addons[0].flags.disableOnExpiry, false)
+      assert.equal(view.expiryMatchesInstalled, true)
+      group = await s.repository.getGroup(firstAuth, s.group.id)
+      await s.repository.saveGroupDraft(
+        firstAuth,
+        group.id,
+        {
+          expectedVersion: group.version,
+          name: group.name,
+          safeMode: group.safeMode,
+          addons: group.draft.map((addon) => ({
+            ...addon,
+            flags: { ...addon.flags, disableOnExpiry: true },
+          })),
+        },
+        randomUUID()
+      )
+      await s.publish()
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+      assert.equal(
+        (await s.repository.getAccountAddons(firstAuth, s.id)).addons[0].metadata.customName,
+        'My individual name'
+      )
+    }
+  )
+  check(
     'expiry installs only the notice, repeated checks preserve setup, and renewal/removal clear the notice',
     async (s) => {
       await s.activate()

@@ -231,8 +231,9 @@ export function ManagedAccountOperations({
               </p>
               {preview.target === 'suspended' && (
                 <p>
-                  This membership has expired. Activation will disable normal addons and retain the
-                  saved setup. If configured, only the membership notice will remain.
+                  This membership has expired. Activation will disable the selected addons and
+                  retain unchecked addons. The membership notice is included if enabled. Renewal
+                  restores the saved setup.
                 </p>
               )}
               {preview.addons.length > 0 && (

@@ -2,7 +2,7 @@
 
 This build supports individual account setups, optional groups, account-specific
 overrides, first-sync review and
-activation, selectable expiry timezones, automatic suspension, renewal, retry,
+activation, selectable expiry timezones, selective addon suspension, renewal, retry,
 login repair, group deletion, an optional Stremio expiry notice, and verified removal. Use the dedicated Stremio test accounts and
 Android devices agreed for acceptance testing.
 
@@ -68,11 +68,21 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    Open a disposable group and choose **Delete group**. Confirm the dialog; the
    group should disappear and its members should remain as individual accounts,
    with their complete addon setups, customizations and memberships preserved.
-6. Set one account's expiry a few minutes ahead, in the chosen timezone. After the
+6. In the group editor, set **Disable on expiry** for each addon. For a typical
+   setup, check Streams/AIOStreams and leave Cinemeta, AIOMetadata and subtitles
+   unchecked. **Keep browsing addons** selects this using declared resources;
+   addons that also provide streams remain checked. Review the choices, **Save
+   draft → Preview publication → Publish group revision**. Old groups still
+   disable all addons until you publish an explicit choice. Individual accounts
+   can make the same choices; group addons inherit the group's expiry settings
+   even when their names or catalogs are customized for one account.
+   Set one account's expiry a few minutes ahead, in the chosen timezone. After the
    cutoff, check **Expired accounts**, the verified suspension status, and Android.
-   **Expired · disable pending** must not be mistaken for a verified suspension;
-   a staged expired account says **sync not started**. The saved addon switches
-   are labeled **On renewal**. **Check Stremio** shows what is actually installed.
+   **Expired · sync pending** must not be mistaken for **Expired · sync verified**;
+   a staged expired account says **sync not started**. Only selected addons have
+   their switches labeled **On renewal**. **Check Stremio** shows the installed list
+   and whether it matches the selected expiry setup. Retained browsing addons must
+   not produce a failure warning. Already switched-off addons must stay off.
    Saved addon configuration and former group assignment must remain available.
    Expired accounts are rechecked about every five minutes, subject to backlog
    and provider availability. Ordinary active client edits are not periodically
@@ -80,9 +90,12 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    To show an expiry card, open **Accounts → ⋯ → Sync settings → Expiry notice in
    Stremio**, enable it, and save the address of this AIOManager installation,
    a message, and an optional renewal/contact URL. Existing expired accounts are
-   queued for this change. Check that only **Membership expired** is installed;
-   Stremio should show its Home/Discover card and an expiry notice in movie/series
-   source lists. Without a renewal URL, the notice opens a simple information page.
+   queued for this change. Check that the unchecked browsing addons and
+   **Membership expired** are installed, while selected streaming addons are gone.
+   Open a movie and a series episode: browsing and details should still work, with
+   “Your box has expired. Please reach out to your contact to renew.” (or your
+   custom message) in the source list. The notice also provides a Home/Discover card.
+   Without a renewal URL, the notice opens a simple information page.
    The URL must be reachable from the Stremio device and allow unauthenticated
    access to `/api/notice/*`. `127.0.0.1:1611` works only on this Windows computer;
    use the test installation's public HTTPS address for a TV or another device.

@@ -166,7 +166,7 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
       <p className="text-sm text-muted-foreground">
         {account.state === 'staged'
           ? 'Your Stremio addons stay unchanged until you start sync.'
-          : 'Changes apply through managed sync. Expiry disables normal addons but keeps their saved setup for renewal.'}{' '}
+          : 'Changes apply through managed sync. Expiry disables the selected addons and keeps their saved setup for renewal.'}{' '}
         Lifetime has no automatic cutoff. An unset expiry is not a lifetime membership.
       </p>
       <form
@@ -276,8 +276,9 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
               )}
               {resolved.ok && resolved.expiry.at <= Date.now() && (
                 <p role="status" className="text-sm text-amber-600 dark:text-amber-400">
-                  This cutoff has already passed. Once managed sync is enabled, this membership
-                  requires normal addons to be disabled. Only the expiry notice remains if enabled.
+                  This cutoff has already passed. Once managed sync is enabled, this membership uses
+                  the selected expiry setup. Unchecked addons and the enabled expiry notice remain
+                  available.
                 </p>
               )}
             </div>

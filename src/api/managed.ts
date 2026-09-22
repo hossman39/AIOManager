@@ -191,6 +191,7 @@ const accountAddonsSchema = z.object({
   installed: addonsSchema.nullable(),
   installedAt: z.number().int().nullable().optional(),
   savedMatchesInstalled: z.boolean().nullable().optional(),
+  expiryMatchesInstalled: z.boolean().nullable().optional(),
 })
 const accountAddonsResultSchema = accountAddonsSchema.extend({
   jobId: z.uuid().nullable(),

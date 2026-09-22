@@ -6,6 +6,43 @@ been accessed or modified. Branch checkpoints/CI do not authorize production rol
 
 ## Current testing increment
 
+Expiry now follows per-addon **Disable on expiry** choices saved in the encrypted
+group revision. Publishing applies the choices to already expired members too;
+saving a draft alone remains passive. Existing configurations default to disabling
+all addons until explicitly changed. A **Keep browsing addons** shortcut retains
+metadata/catalog/subtitle providers without a stream resource. Combined providers
+stay selected for disabling; the owner can adjust every checkbox.
+
+Group expiry choices take precedence over an individual's customization of the
+same addon. Individual and account-only addons also support expiry choices, and
+leaving/deleting a group preserves them. Suspension retains enabled, unchecked
+addons plus the optional renewal notice; renewal restores saved enable preferences.
+Offboarding still requires a verified empty collection. Unreadable group policies
+retain the fallback that removes access rather than guessing which addons to keep.
+
+The account screen compares live Stremio results against the selected expiry setup
+and no longer calls retained catalogs an enforcement failure. The default notice
+message is “Your box has expired. Please reach out to your contact to renew.”
+Existing customized messages are preserved. Notice setup remains in Sync settings
+and requires an address reachable from the Stremio device.
+
+Local validation: 322 tests pass; 122 PostgreSQL contracts require hosted CI.
+Typecheck, lint and build pass. New shared contracts exercise browsing/subtitle
+retention, disabled preferences, expiry-only publication, personal overrides,
+drift repair, group deletion, renewal, full removal, protected no-write acceptance,
+invalid readback rejection and unreadable-policy fallback.
+
+An isolated browser walkthrough published the browsing shortcut to an already
+expired member, then verified Cinemeta plus the renewal notice with the streaming
+addon absent. The episode-source endpoint returned the new message. Group and
+account expiry controls fit a 390px viewport without horizontal overflow.
+The local test instance preserves its database/key, serves `index-DT9XSvYD.js`
+on port 1611, and has an encrypted pre-update SQLite copy outside version control.
+Its notice is still unconfigured; the acceptance steps include enabling it with a
+reachable address. No real provider writes were used for this increment's tests.
+
+## Earlier expiry-notice checkpoint
+
 Expiry status now distinguishes membership expiry, pending enforcement and verified
 disabling. The account's **Check Stremio** action lists the provider's actual addons
 and the checked email; saved switches explicitly describe renewal preferences.

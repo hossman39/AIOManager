@@ -31,7 +31,7 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
       setNotice(
         result.settings.enabled
           ? `Expiry notice saved. ${result.queued} expired account${result.queued === 1 ? '' : 's'} queued for sync.`
-          : 'Expiry notice turned off. Normal addons still remain disabled on expiry.'
+          : 'Expiry notice turned off. Selected addons still remain disabled on expiry.'
       )
       onChanged()
     }
@@ -84,8 +84,9 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
           Expiry notice in Stremio
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Replace an expired account’s normal addons with a membership notice. Renewal removes the
-          notice and restores its saved setup.
+          Show a renewal message in movie and episode sources for expired accounts. Keep a metadata
+          addon available using the group’s expiry choices so shows still open. Renewal removes the
+          notice and restores the saved setup.
         </p>
       </div>
       <form

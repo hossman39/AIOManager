@@ -166,6 +166,7 @@ export function createManagedRepository({
       publicAccount,
       jobs,
       runtime,
+      now,
     }),
     ...createManagedOperations({
       db,

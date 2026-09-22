@@ -62,6 +62,7 @@ try {
       if (url.hostname === 'cinemeta.example.invalid') {
         manifest.id = 'com.linvo.cinemeta'
         manifest.name = 'Cinemeta'
+        manifest.resources = ['catalog', 'meta']
       }
       if (url.pathname.includes('/wrong-id/')) manifest.id = 'different.addon'
       return { status: 200, headers: {}, body: Buffer.from(JSON.stringify(manifest)) }

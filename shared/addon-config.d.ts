@@ -29,7 +29,13 @@ export interface ManagedCinemetaConfig {
 export interface ManagedAddon {
   transportUrl: string
   manifest: ManagedManifest
-  flags?: { enabled?: boolean; protected?: boolean; official?: boolean; [key: string]: unknown }
+  flags?: {
+    enabled?: boolean
+    protected?: boolean
+    official?: boolean
+    disableOnExpiry?: boolean
+    [key: string]: unknown
+  }
   metadata?: {
     customName?: string
     customLogo?: string

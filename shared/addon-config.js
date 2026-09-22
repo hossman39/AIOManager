@@ -59,6 +59,7 @@ const descriptor = z.looseObject({
       official: z.boolean().optional(),
       protected: z.boolean().optional(),
       enabled: z.boolean().optional(),
+      disableOnExpiry: z.boolean().optional(),
     })
     .optional(),
   metadata: z

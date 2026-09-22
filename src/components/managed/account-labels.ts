@@ -5,8 +5,8 @@ export function accountStatus(account: ManagedAccount) {
   if (account.expired || account.suspendedAt !== null) {
     if (account.state === 'staged') return 'Expired · sync not started'
     return account.appliedVersion === account.policyVersion && account.appliedTarget === 'suspended'
-      ? 'Expired · addons disabled'
-      : 'Expired · disable pending'
+      ? 'Expired · sync verified'
+      : 'Expired · sync pending'
   }
   if (account.state === 'staged') return 'Sync not started'
   if (account.appliedVersion !== account.policyVersion) return 'Sync pending'

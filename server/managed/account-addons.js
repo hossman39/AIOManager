@@ -8,6 +8,9 @@ import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { parseAddonConfiguration } from '../../shared/addon-config.js'
 import { isExpiryNotice } from '../../shared/expiry-notice.js'
+import { applyGroupExpiryPolicy } from '../../shared/expiry-policy.js'
+import { readExpiryNotice, expiryNoticeAddon } from './expiry-notice.js'
+import { currentAccountTarget } from './entitlement.js'
 
 const saveSchema = z.strictObject({
   expectedVersion: z.number().int().positive(),
@@ -26,6 +29,7 @@ export function createAccountAddonRepository({
   publicAccount,
   jobs,
   runtime,
+  now = Date.now,
 }) {
   const get = async (tx, owner, id) => {
     const row = await tx.get('SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2', [
@@ -60,7 +64,14 @@ export function createAccountAddonRepository({
       return checkedCollection(observed)
     })
   }
-  const response = (row, setup, addons, installed = null, source = 'saved') => ({
+  const response = (
+    row,
+    setup,
+    addons,
+    installed = null,
+    source = 'saved',
+    expiryMatchesInstalled = null
+  ) => ({
     account: publicAccount(row),
     addons,
     groupAddons: setup.group,
@@ -69,7 +80,8 @@ export function createAccountAddonRepository({
     overrides: setup.accountOverrides,
     source,
     installed,
-    installedAt: installed === null ? null : Date.now(),
+    installedAt: installed === null ? null : now(),
+    expiryMatchesInstalled,
     savedMatchesInstalled:
       installed === null
         ? null
@@ -89,7 +101,25 @@ export function createAccountAddonRepository({
       const addons = initial
         ? installed.filter((addon) => !isExpiryNotice(addon))
         : projectManagedCollection({ ...setup, remote: [], target: 'active' }).configuration
-      return response(row, setup, addons, installed, initial ? 'stremio' : 'saved')
+      let expiryMatchesInstalled = null
+      if (installed && currentAccountTarget(row, now()) === 'suspended') {
+        const settings = await db.get('SELECT * FROM managed_owners WHERE owner_id = $1', [owner])
+        const expected = projectManagedCollection({
+          ...setup,
+          remote: installed,
+          target: 'suspended',
+          expiryNotice: expiryNoticeAddon(readExpiryNotice(settings, crypto)),
+        }).expected
+        expiryMatchesInstalled = sameAddonSetup(installed, stremioCollection(expected))
+      }
+      return response(
+        row,
+        setup,
+        addons,
+        installed,
+        initial ? 'stremio' : 'saved',
+        expiryMatchesInstalled
+      )
     },
     async setAccountAddons(auth, id, input, key) {
       const parsed = saveSchema.safeParse(input)
@@ -109,14 +139,15 @@ export function createAccountAddonRepository({
           if (row.state === 'offboarding') throw new ManagedError('INVALID_STATE')
           const setup = await readAccountSetup(tx, row, crypto)
           if (setup.groupVersion !== value.groupVersion) throw new ManagedError('VERSION_CONFLICT')
-          const changes = accountSetupChanges(setup.group, value.addons)
+          const addons = applyGroupExpiryPolicy(value.addons, setup.group)
+          const changes = accountSetupChanges(setup.group, addons)
           if (!changes.ok) throw new ManagedError(changes.code)
           if (
             row.addons_initialized &&
             sameAddonSetup(changes.personal, setup.personal) &&
             sameAddonSetup(changes.overrides, setup.accountOverrides)
           ) {
-            return { ...response(row, setup, value.addons), jobId: null, replayed: false }
+            return { ...response(row, setup, addons), jobId: null, replayed: false }
           }
           await tx.run(
             'UPDATE managed_accounts SET personal_enc = $1, addon_overrides_enc = $2, addons_initialized = 1, record_version = record_version + 1, policy_version = policy_version + 1, updated_at = $3 WHERE owner_id = $4 AND id = $5',
@@ -137,7 +168,7 @@ export function createAccountAddonRepository({
             ...response(
               updated,
               { ...setup, personal: changes.personal, accountOverrides: changes.overrides },
-              value.addons
+              addons
             ),
             jobId: job?.id ?? null,
             replayed: false,

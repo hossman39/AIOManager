@@ -228,13 +228,14 @@ function GroupEditor({
           </select>
         </label>
         <p className="text-xs text-muted-foreground">
-          Saved protection settings apply on the next sync. Expiry still disables normal addons,
-          including protected entries.
+          Saved protection settings apply on the next sync. The expiry choices below also apply to
+          protected addons.
         </p>
       </fieldset>
       <ManagedAddonCards
         key={editorEpoch}
         addons={addons}
+        expiryControls
         api={api}
         disabled={externalBusy || mutation.busy || mutation.uncertain || mutation.stale || reading}
         onBusyChange={setResolving}
@@ -316,9 +317,9 @@ function GroupEditor({
             targets · {preview.counts.staged} staged · {preview.counts.offboarding} offboarding.
           </p>
           <p>
-            Active and expired users receive queued work. Expired targets stay disabled. Staged
-            users are not activated; offboarding is not cancelled. Safe-mode effects require a fresh
-            account read during execution.
+            Active and expired users receive queued work. Expired accounts use the selected expiry
+            setup. Staged users are not activated; offboarding is not cancelled. Safe-mode effects
+            require a fresh account read during execution.
           </p>
           <p className="text-muted-foreground">
             Preview expires {new Date(preview.expiresAt).toLocaleTimeString()}. Published changes

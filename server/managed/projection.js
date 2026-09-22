@@ -6,6 +6,7 @@ import {
 import { ManagedError } from './errors.js'
 import { applyAccountOverrides } from '../../shared/account-addons.js'
 import { isExpiryNotice } from '../../shared/expiry-notice.js'
+import { applyGroupExpiryPolicy, disablesOnExpiry } from '../../shared/expiry-policy.js'
 
 export function checkedCollection(value) {
   const result = parseAddonConfiguration(value)
@@ -91,6 +92,7 @@ export function projectManagedCollection({
   accountOverrides,
   individual = false,
   expiryNotice = null,
+  expirySetupAvailable = true,
 }) {
   const retained = checkedCollection(saved).filter((addon) => !isExpiryNotice(addon))
   const observed = checkedCollection(remote).filter((addon) => !isExpiryNotice(addon))
@@ -98,13 +100,36 @@ export function projectManagedCollection({
   if (target === 'suspended' || target === 'offboard') {
     // Capture previously unseen remote defaults before disabling them, without
     // replacing saved preferences with either an empty list or a disabled copy.
-    const configuration = checkedCollection([
+    let configuration = checkedCollection([
       ...retained,
       ...observed.filter((addon) => !savedByUrl.has(identity(addon))),
     ])
+    let kept = []
+    if (target === 'suspended' && expirySetupAvailable) {
+      const active = projectManagedCollection({
+        group,
+        personal,
+        saved,
+        remote,
+        safeMode,
+        accountOverrides,
+        individual,
+        target: 'active',
+      }).configuration
+      const activeByUrl = new Map(active.map((addon) => [identity(addon), addon]))
+      const capturedUrls = new Set(configuration.map(identity))
+      configuration = checkedCollection([
+        ...configuration.map((addon) => activeByUrl.get(identity(addon)) ?? addon),
+        ...active.filter((addon) => !capturedUrls.has(identity(addon))),
+      ])
+      kept = providerCollection(active.filter((addon) => !disablesOnExpiry(addon)))
+    }
     return {
       configuration,
-      expected: target === 'suspended' && expiryNotice ? checkedCollection([expiryNotice]) : [],
+      expected: checkedCollection([
+        ...kept,
+        ...(target === 'suspended' && expiryNotice ? [expiryNotice] : []),
+      ]),
     }
   }
   if (target !== 'active' || typeof safeMode !== 'boolean') throw new ManagedError('INVALID_STATE')
@@ -171,6 +196,9 @@ export function projectManagedCollection({
       (a, b) => (positions.get(identity(a)) ?? Infinity) - (positions.get(identity(b)) ?? Infinity)
     )
   }
-  configuration = checkedCollection(configuration).filter((addon) => !isExpiryNotice(addon))
+  configuration = applyGroupExpiryPolicy(
+    checkedCollection(configuration).filter((addon) => !isExpiryNotice(addon)),
+    group
+  )
   return { configuration, expected: providerCollection(configuration) }
 }

@@ -305,7 +305,7 @@ function AccountAddons({
   }, [load])
   const dirty = data !== null && !sameAddonSetup(addons, data.addons)
   const expired = account.expired || account.suspendedAt !== null
-  const verifiedDisabled =
+  const verifiedExpiry =
     account.appliedVersion === account.policyVersion && account.appliedTarget === 'suspended'
   const installed = data?.installed ?? null
   const installedRegular = installed?.filter((addon) => !isExpiryNotice(addon)) ?? []
@@ -336,7 +336,7 @@ function AccountAddons({
         <div>
           <h3 className="font-semibold">
             {expired
-              ? 'Saved addons for renewal'
+              ? 'Account addons · expired'
               : data?.source === 'stremio'
                 ? 'Installed addons'
                 : 'Account addons'}
@@ -393,11 +393,11 @@ function AccountAddons({
         <p className="rounded-lg border border-amber-500/30 p-3 text-sm">
           {account.state === 'staged'
             ? 'Membership expired, but sync has not been started. AIOManager has not disabled this account’s Stremio addons.'
-            : verifiedDisabled
-              ? `Normal addons were verified disabled on Stremio${account.verifiedAt ? ` at ${new Date(account.verifiedAt).toLocaleString()}` : ''}.`
-              : 'Membership expired. Disabling addons has not yet been verified. Check Sync & access for progress or errors.'}{' '}
-          The settings below are saved for renewal. Their switches do not show what is currently
-          installed.
+            : verifiedExpiry
+              ? `The selected expiry setup was verified on Stremio${account.verifiedAt ? ` at ${new Date(account.verifiedAt).toLocaleString()}` : ''}.`
+              : 'Membership expired. The expiry setup has not yet been verified. Check Sync & access for progress or errors.'}{' '}
+          Addons marked “Disable on expiry” return on renewal if their saved switch is on. Unchecked
+          addons stay available. Use Check Stremio to see the installed list.
         </p>
       )}
       <section
@@ -424,13 +424,16 @@ function AccountAddons({
                 ))}
               </ul>
             )}
-            {expired && installedRegular.length > 0 && (
+            {expired && data?.expiryMatchesInstalled === false && (
               <p className="text-amber-600 dark:text-amber-400">
-                Normal addons are still installed.{' '}
+                Stremio does not yet match the selected expiry setup.{' '}
                 {account.state === 'staged'
                   ? 'Start sync from Sync & access to enforce expiry.'
-                  : 'Open Sync & access to check or retry the disabling job.'}
+                  : 'Open Sync & access to check or retry sync.'}
               </p>
+            )}
+            {expired && data?.expiryMatchesInstalled === true && (
+              <p className="text-muted-foreground">Stremio matches the selected expiry setup.</p>
             )}
             {(data?.account.version !== account.version ||
               (data?.installedAt && (account.verifiedAt ?? 0) > data.installedAt)) && (
@@ -520,7 +523,8 @@ function AccountAddons({
           key={epoch}
           api={api}
           addons={addons}
-          renewalOnly={expired}
+          expired={expired}
+          expiryControls
           groupAddons={data.account.groupId ? data.groupAddons : undefined}
           onChange={setAddons}
           disabled={

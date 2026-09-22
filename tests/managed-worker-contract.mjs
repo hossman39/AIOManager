@@ -7,7 +7,7 @@ import { configuredAddon } from './fixtures/addon-config.mjs'
 import { createManagedJobStore, currentAccountTarget } from '../server/managed/jobs.js'
 import { providerIdentityKey } from '../server/managed/execution.js'
 import { createManagedWorker, ProviderFailure } from '../server/managed/worker.js'
-import { providerCollection } from '../server/managed/projection.js'
+import { providerCollection, projectManagedCollection } from '../server/managed/projection.js'
 import { managedMigrations, migrateManagedSchema } from '../server/managed/schema.js'
 import { prepareJobFixture } from './managed-job-contract.mjs'
 
@@ -114,6 +114,87 @@ export function managedWorkerContract(prefix, options, fixture) {
     test(`${prefix}: ${name}`, options, async (t) =>
       fn(await prepareWorkerFixture(await fixture(t), t), t)
     )
+
+  check(
+    'an already matching selective expiry keeps protected remote metadata without requiring a write',
+    async (s) => {
+      const group = await s.repository.getGroup(firstAuth, s.group.id)
+      const kept = {
+        ...group.draft[0],
+        flags: { enabled: true, protected: true, disableOnExpiry: false },
+      }
+      await s.repository.saveGroupDraft(
+        firstAuth,
+        group.id,
+        {
+          expectedVersion: group.version,
+          name: group.name,
+          safeMode: true,
+          addons: [kept],
+        },
+        randomUUID()
+      )
+      await s.publish()
+      const remote = providerCollection([
+        { ...kept, metadata: { customName: 'Protected remote name' } },
+      ])
+      s.remote.set(`synthetic-${s.ids[0]}`, remote)
+      await s.expire()
+      const result = await s.makeWorker().runOnce()
+      assert.equal(result.state, 'verified', JSON.stringify(result))
+      assert.equal(s.calls.filter((call) => call.method === 'set').length, 0)
+      assert.equal((await s.saved())[0].manifest.name, 'Protected remote name')
+    }
+  )
+
+  check(
+    'expiry verification rejects a matching readback that contains a disabled group addon',
+    async (s) => {
+      await s.expire()
+      await s.jobs.scanExpiry()
+      const claim = await s.jobs.claim()
+      const { policy } = await s.jobs.readExecution(claim)
+      const projected = projectManagedCollection({ ...policy, remote: [] })
+      const forbidden = providerCollection(policy.group)
+      const plan = { ...projected, stamp: policy.stamp, expected: forbidden }
+      await assert.rejects(
+        s.jobs.completeVerified(claim, { expected: forbidden, observed: forbidden, plan }),
+        { code: 'INVALID_STATE' }
+      )
+    }
+  )
+
+  check(
+    'an unreadable published expiry policy never keeps previously allowed addons',
+    async (s) => {
+      const group = await s.repository.getGroup(firstAuth, s.group.id)
+      await s.repository.saveGroupDraft(
+        firstAuth,
+        group.id,
+        {
+          expectedVersion: group.version,
+          name: group.name,
+          safeMode: true,
+          addons: group.draft.map((addon) => ({
+            ...addon,
+            flags: { ...addon.flags, disableOnExpiry: false },
+          })),
+        },
+        randomUUID()
+      )
+      await s.publish()
+      const worker = s.makeWorker()
+      assert.equal((await worker.runOnce()).state, 'verified')
+      await s.expire()
+      await s.db.run('UPDATE managed_group_revisions SET payload_digest = $1 WHERE group_id = $2', [
+        'corrupt',
+        group.id,
+      ])
+      const result = await worker.runOnce()
+      assert.equal(result.state, 'verified', JSON.stringify(result))
+      assert.deepEqual(s.remote.get(`synthetic-${s.ids[0]}`), [])
+    }
+  )
 
   test(
     `${prefix}: additive upgrade retains known suspension and does not undo an explicit renewal`,

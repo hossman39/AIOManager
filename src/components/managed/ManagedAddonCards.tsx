@@ -40,13 +40,15 @@ import {
 } from '@/lib/managed/addon-draft'
 import { addonUrlIdentity, type ManagedAddon } from '../../../shared/addon-config.js'
 import { sameAddonSetup } from '../../../shared/account-addons.js'
+import { disablesOnExpiry, isBrowsingAddon } from '../../../shared/expiry-policy.js'
 
 type Props = {
   addons: ManagedAddon[]
   onChange: (addons: ManagedAddon[]) => void
   api: Pick<ReturnType<typeof createManagedApi>, 'resolveManifest'>
   disabled?: boolean
-  renewalOnly?: boolean
+  expired?: boolean
+  expiryControls?: boolean
   groupAddons?: ManagedAddon[]
   onBusyChange?: (busy: boolean) => void
   onPendingChange?: (pending: boolean) => void
@@ -78,7 +80,8 @@ export function ManagedAddonCards({
   onChange,
   api,
   disabled = false,
-  renewalOnly = false,
+  expired = false,
+  expiryControls = false,
   groupAddons,
   onBusyChange,
   onPendingChange,
@@ -172,6 +175,41 @@ export function ManagedAddonCards({
   )
   return (
     <div className="min-w-0 space-y-4">
+      {expiryControls && addons.length > 0 && (
+        <div className="space-y-2 rounded-lg border bg-muted/10 p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="font-medium">On expiry</h4>
+            {!groupAddons && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={locked}
+                onClick={() =>
+                  commit(
+                    addons.map((addon) => ({
+                      ...addon,
+                      flags: { ...addon.flags, disableOnExpiry: !isBrowsingAddon(addon) },
+                    }))
+                  )
+                }
+              >
+                Keep browsing addons
+              </Button>
+            )}
+          </div>
+          <p className="text-muted-foreground">
+            Check the addons to disable when membership expires. Leave Cinemeta or another metadata
+            addon unchecked so shows still open. Addons that also provide streams are disabled by
+            the browsing shortcut.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {groupAddons
+              ? 'Group addon choices are managed in Groups. You can choose separately for account-only addons.'
+              : 'The shortcut keeps catalog, metadata, and subtitle addons that do not provide streams. Review the checkboxes before saving.'}{' '}
+            Enable the renewal message in Sync settings → Expiry notice in Stremio.
+          </p>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Input
           className="mr-auto w-full sm:max-w-xs"
@@ -217,6 +255,8 @@ export function ManagedAddonCards({
             (item) => addonUrlIdentity(item.transportUrl) === addonUrlIdentity(addon.transportUrl)
           )
           const custom = base && !sameAddonSetup([base], [addon])
+          const disableOnExpiry = disablesOnExpiry(base ?? addon)
+          const renewalOnly = expired && disableOnExpiry
           const logo = addon.metadata?.customLogo || addon.manifest.logo
           return (
             <article
@@ -270,6 +310,32 @@ export function ManagedAddonCards({
                 <p className="mb-3 text-xs text-muted-foreground">
                   On renewal: {addon.flags?.enabled !== false ? 'enabled' : 'disabled'}
                 </p>
+              )}
+              {expiryControls && (
+                <div className="mb-3 space-y-1 text-xs">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={disableOnExpiry}
+                      disabled={locked || Boolean(base)}
+                      aria-label={`Disable ${nameOf(addon)} on expiry`}
+                      onChange={(event) =>
+                        edit(addon.transportUrl, {
+                          ...addon,
+                          flags: { ...addon.flags, disableOnExpiry: event.target.checked },
+                        })
+                      }
+                    />
+                    Disable on expiry{base ? ' · Group setting' : ''}
+                  </label>
+                  {!disableOnExpiry && (
+                    <p className="text-muted-foreground">
+                      {addon.flags?.enabled === false
+                        ? 'Already switched off.'
+                        : 'Kept available after expiry.'}
+                    </p>
+                  )}
+                </div>
               )}
               <p className="mb-4 line-clamp-2 min-h-10 text-sm text-muted-foreground">
                 {addon.metadata?.customDescription ||
