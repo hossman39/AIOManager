@@ -19,9 +19,9 @@ export async function preparePublicationFixture(
   const repository = createManagedRepository({
     ...storage,
     legacyKeys: [syntheticKey],
-    validateManifests: async (addons) => {
+    validateManifests: async (addons, options) => {
       validationCalls++
-      return validator(addons)
+      return validator(addons, options)
     },
   })
   const seeded = await prepareGroupFixture({ ...storage, repository }, count)
@@ -70,6 +70,310 @@ export async function preparePublicationFixture(
 export function managedPublicationContract(prefix, options, fixture) {
   const check = (name, fn) =>
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
+  const changesFor = (group, changes = {}) => ({
+    expectedVersion: group.version,
+    name: group.name,
+    addons: group.draft,
+    safeMode: group.safeMode,
+    allowEmpty: false,
+    ...changes,
+  })
+  const persisted = (db) =>
+    Promise.all(
+      [
+        'managed_groups',
+        'managed_group_revisions',
+        'managed_accounts',
+        'managed_jobs',
+        'managed_deployments',
+        'managed_audit',
+        'managed_idempotency',
+      ].map(async (table) =>
+        (await db.query(`SELECT * FROM ${table}`)).map((row) => JSON.stringify(row)).sort()
+      )
+    )
+
+  check(
+    'one-call publication saves edits and queues the current mixed cohort atomically',
+    async (storage) => {
+      const { db, repository, group, accounts, activateAll, crypto, now } =
+        await preparePublicationFixture(storage, {
+          count: 4,
+          validator: async (addons) => {
+            // Validation can perform independent DB work but cannot mutate the saved input.
+            await storage.db.transaction((tx) =>
+              tx.get('SELECT COUNT(*) AS count FROM managed_groups')
+            )
+            addons[0].manifest.name = 'Synthetic validator mutation'
+            return true
+          },
+        })
+      await activateAll()
+      await db.run("UPDATE managed_accounts SET state = 'staged' WHERE id = $1", [accounts[0].id])
+      await db.run("UPDATE managed_accounts SET state = 'offboarding' WHERE id = $1", [
+        accounts[1].id,
+      ])
+      await db.run(
+        "UPDATE managed_accounts SET lifetime = 0, expiry_at = $1, expiry_local = '2026-09-19T00:00', expiry_offset = -240, expiry_timezone = 'America/New_York' WHERE id = $2",
+        [now(), accounts[2].id]
+      )
+      await db.run('UPDATE managed_accounts SET lifetime = 1 WHERE id = $1', [accounts[3].id])
+      const input = changesFor(group, {
+        name: 'Published in one click',
+        safeMode: false,
+        addons: [{ ...group.draft[0], flags: { ...group.draft[0].flags, disableOnExpiry: false } }],
+      })
+      const result = await repository.publishGroupChanges(firstAuth, group.id, input, randomUUID())
+      assert.equal(result.group.name, input.name)
+      assert.equal(result.group.safeMode, false)
+      assert.deepEqual(result.group.draft, input.addons)
+      assert.equal(result.revision, 1)
+      assert.equal(result.queued, 2)
+      assert.deepEqual(await repository.getGroup(firstAuth, group.id), result.group)
+      const rollout = await repository.getDeployment(firstAuth, result.deploymentId)
+      assert.deepEqual(rollout.skipped, { staged: 1, offboarding: 1 })
+      assert.equal(
+        rollout.members.find((member) => member.accountId === accounts[2].id).target,
+        'suspended'
+      )
+      assert.equal(
+        rollout.members.find((member) => member.accountId === accounts[3].id).target,
+        'active'
+      )
+      for (const account of accounts.slice(0, 2))
+        assert.equal((await repository.getAccount(firstAuth, account.id)).version, 1)
+      const revision = await db.get('SELECT * FROM managed_group_revisions WHERE group_id = $1', [
+        group.id,
+      ])
+      assert.deepEqual(
+        crypto.open(revision.config_enc, {
+          owner: firstAuth.owner,
+          id: group.id,
+          purpose: 'group-revision:1',
+        }),
+        input.addons
+      )
+    }
+  )
+
+  check(
+    'one-call validation failures and cancellation leave every saved value untouched',
+    async (storage) => {
+      const abort = new AbortController()
+      let outcome = 'unavailable'
+      const { db, repository, group } = await preparePublicationFixture(storage, {
+        validator: async (_addons, options) => {
+          assert.equal(options.signal, abort.signal)
+          if (outcome === 'cancel') abort.abort()
+          else if (outcome === 'unavailable') throw new Error('Synthetic unavailable SECRET')
+          return outcome !== 'unconfirmed'
+        },
+      })
+      const before = await persisted(db)
+      const input = changesFor(group, { name: 'Should not be saved', safeMode: false })
+      for (outcome of ['unavailable', 'unconfirmed', 'cancel']) {
+        await assert.rejects(
+          repository.publishGroupChanges(firstAuth, group.id, input, randomUUID(), {
+            signal: abort.signal,
+          }),
+          outcome === 'cancel' ? { name: 'AbortError' } : { code: 'MANIFEST_UNAVAILABLE' }
+        )
+        assert.deepEqual(await persisted(db), before)
+      }
+    }
+  )
+
+  check(
+    'one-call publication rolls back saved edits as well as jobs after a late failure',
+    async (storage) => {
+      const { db, repository, group, activateAll } = await preparePublicationFixture(storage)
+      await activateAll()
+      const before = await persisted(db)
+      const original = db.statement.bind(db)
+      db.statement = (connection, method, sql, params) => {
+        if (
+          sql.startsWith('INSERT INTO managed_idempotency') &&
+          params[1] === 'groups.publish-changes'
+        )
+          throw new Error('Synthetic final insert failure')
+        return original(connection, method, sql, params)
+      }
+      const key = randomUUID()
+      const input = changesFor(group, { name: 'Atomic edit', safeMode: false })
+      try {
+        await assert.rejects(
+          repository.publishGroupChanges(firstAuth, group.id, input, key),
+          /Synthetic final insert failure/
+        )
+      } finally {
+        db.statement = original
+      }
+      assert.deepEqual(await persisted(db), before)
+      assert.equal(
+        (await repository.publishGroupChanges(firstAuth, group.id, input, key)).queued,
+        3
+      )
+    }
+  )
+
+  check(
+    'one-call retries skip network validation and concurrent duplicates publish once',
+    async (storage) => {
+      let online = true
+      const { db, repository, group, activateAll, validationCalls } =
+        await preparePublicationFixture(storage, {
+          validator: async () => {
+            if (!online) throw new Error('Synthetic offline')
+            return true
+          },
+        })
+      await activateAll()
+      const key = randomUUID()
+      const input = changesFor(group, { name: 'One accepted request' })
+      const results = await Promise.all(
+        Array.from({ length: 3 }, () =>
+          repository.publishGroupChanges(firstAuth, group.id, input, key)
+        )
+      )
+      assert.equal(results.filter((result) => !result.replayed).length, 1)
+      assert.equal(new Set(results.map((result) => result.deploymentId)).size, 1)
+      const calls = validationCalls()
+      const before = await persisted(db)
+      online = false
+      const replay = await repository.publishGroupChanges(firstAuth, group.id, input, key)
+      assert.equal(replay.replayed, true)
+      assert.equal(replay.deploymentId, results[0].deploymentId)
+      await assert.rejects(
+        repository.publishGroupChanges(
+          firstAuth,
+          group.id,
+          { ...input, name: 'Different request' },
+          key
+        ),
+        { code: 'IDEMPOTENCY_CONFLICT' }
+      )
+      assert.equal(validationCalls(), calls)
+      assert.deepEqual(await persisted(db), before)
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 3)
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_group_revisions')).count, 1)
+    }
+  )
+
+  check(
+    'one-call publication fences competing edits and foreign or archived groups',
+    async (storage) => {
+      const { db, repository, group } = await preparePublicationFixture(storage)
+      const input = changesFor(group)
+      const before = await persisted(db)
+      await assert.rejects(
+        repository.publishGroupChanges(secondAuth, group.id, input, randomUUID()),
+        { code: 'NOT_FOUND' }
+      )
+      await assert.rejects(repository.publishGroupChanges(firstAuth, group.id, input, 'short'), {
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+      })
+      assert.deepEqual(await persisted(db), before)
+      const results = await Promise.allSettled(
+        ['First edit', 'Second edit'].map((name) =>
+          repository.publishGroupChanges(firstAuth, group.id, { ...input, name }, randomUUID())
+        )
+      )
+      assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1)
+      assert.equal(
+        results.find((result) => result.status === 'rejected').reason.code,
+        'VERSION_CONFLICT'
+      )
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_group_revisions')).count, 1)
+      const latest = await repository.getGroup(firstAuth, group.id)
+      await db.run('UPDATE managed_groups SET archived = 1 WHERE id = $1', [group.id])
+      await assert.rejects(
+        repository.publishGroupChanges(firstAuth, group.id, changesFor(latest), randomUUID()),
+        { code: 'INVALID_STATE' }
+      )
+    }
+  )
+
+  check(
+    'one-call empty and conflicting setups fail without leaving an edited draft',
+    async (storage) => {
+      const { db, repository, group, accounts } = await preparePublicationFixture(storage)
+      await repository.setPersonalAddons(
+        firstAuth,
+        accounts[0].id,
+        {
+          expectedVersion: 1,
+          addons: [configuredAddon('PersonalOnly')],
+        },
+        randomUUID()
+      )
+      const before = await persisted(db)
+      const empty = changesFor(group, { name: 'Empty edit', addons: [] })
+      await assert.rejects(
+        repository.publishGroupChanges(firstAuth, group.id, empty, randomUUID()),
+        { code: 'EMPTY_PUBLICATION_CONFIRMATION' }
+      )
+      assert.deepEqual(await persisted(db), before)
+      const collision = changesFor(group, { addons: [configuredAddon('PersonalOnly')] })
+      await assert.rejects(
+        repository.publishGroupChanges(firstAuth, group.id, collision, randomUUID()),
+        { code: 'ADDON_LAYER_CONFLICT' }
+      )
+      assert.deepEqual(await persisted(db), before)
+      const published = await repository.publishGroupChanges(
+        firstAuth,
+        group.id,
+        { ...empty, allowEmpty: true },
+        randomUUID()
+      )
+      assert.equal(published.group.name, empty.name)
+      assert.equal(published.group.addonCount, 0)
+      assert.equal(
+        (await db.get('SELECT explicit_empty FROM managed_group_revisions')).explicit_empty,
+        1
+      )
+    }
+  )
+
+  check(
+    'one-call protection edits queue a rollout while renaming or unchanged addons do not',
+    async (storage) => {
+      const { db, repository, group, activateAll } = await preparePublicationFixture(storage)
+      await activateAll()
+      const initial = await repository.publishGroupChanges(
+        firstAuth,
+        group.id,
+        changesFor(group),
+        randomUUID()
+      )
+      const protection = await repository.publishGroupChanges(
+        firstAuth,
+        group.id,
+        changesFor(initial.group, { safeMode: false }),
+        randomUUID()
+      )
+      assert.equal(protection.revision, 2)
+      assert.equal(protection.queued, 3)
+      const rename = await repository.publishGroupChanges(
+        firstAuth,
+        group.id,
+        changesFor(protection.group, { name: 'Renamed group' }),
+        randomUUID()
+      )
+      assert.equal(rename.group.name, 'Renamed group')
+      assert.equal(rename.revision, 2)
+      assert.equal(rename.queued, 0)
+      assert.equal(rename.unchanged, true)
+      const unchanged = await repository.publishGroupChanges(
+        firstAuth,
+        group.id,
+        changesFor(rename.group),
+        randomUUID()
+      )
+      assert.deepEqual(unchanged.group, rename.group)
+      assert.equal(unchanged.deploymentId, protection.deploymentId)
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 6)
+    }
+  )
 
   check(
     'published rollout discovery is scoped, read-only and follows the published revision',

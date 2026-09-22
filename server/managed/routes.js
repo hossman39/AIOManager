@@ -194,6 +194,22 @@ export async function registerManagedRoutes(app, repository, manifestService) {
         )
         return reply.code(result.replayed || result.unchanged ? 200 : 201).send(result)
       })
+      routes.post(
+        '/groups/:id/publish-changes',
+        { bodyLimit: MAX_ADDON_CONFIG_BYTES + 4096 },
+        async (request, reply) => {
+          const result = await cancelReadOnDisconnect(request, reply, (signal) =>
+            repository.publishGroupChanges(
+              request.managedAuth,
+              request.params.id,
+              request.body,
+              request.headers['idempotency-key'],
+              { signal }
+            )
+          )
+          return reply.code(result.replayed || result.unchanged ? 200 : 201).send(result)
+        }
+      )
       routes.get('/deployments/:id', (request) =>
         repository.getDeployment(request.managedAuth, request.params.id)
       )

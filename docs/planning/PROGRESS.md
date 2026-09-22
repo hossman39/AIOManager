@@ -6,6 +6,44 @@ been accessed or modified. Branch checkpoints/CI do not authorize production rol
 
 ## Current testing increment
 
+Groups now use a single **Publish changes** action. It validates the current edits,
+saves the name/addons/protection settings, records an immutable revision and queues
+the current eligible members in one transaction. Failed validation or any later
+database failure leaves the saved group unchanged. Exact retries return the original
+result even after restart or a manifest outage. Older draft/preview APIs remain
+compatible, but those separate steps are no longer presented in the group editor.
+Protection-only changes also queue sync; renaming an unchanged setup does not.
+
+An open group now shows its members, links to individual accounts, and an **Add
+members** picker with name/email search. The picker reads all account pages,
+excludes existing members and accounts being removed, and supports up to 200
+selected accounts per assignment. Moving from another group is labeled explicitly.
+Group settings replace matching addon overrides while account-only addons remain.
+Accounts whose first sync has not started remain inactive; an unpublished group
+cannot receive accounts whose sync has started. Existing assignment version checks
+and retry handling are retained.
+
+Local validation: 331 tests pass; the 129 PostgreSQL contracts run in hosted CI.
+Typecheck, lint and build pass. New shared contracts cover atomic publication,
+mixed account states, expiry edits, validation/cancellation failures, rollback,
+concurrent requests, retries, empty configurations, ownership and protection edits.
+The HTTP test confirms persistence and exact replay after restart.
+
+An isolated browser walkthrough published edits with one click, added an individual
+account from inside its group, and moved both an expired active member and an
+inactive member to another group. Simulated lost responses for assignment and
+publication both recovered through exact retries without duplicate work. The
+member picker fits a 390px viewport without horizontal overflow. Provider traffic
+in this rehearsal uses synthetic fixtures.
+
+The user accepted renewal, individual overrides, group updates and group deletion
+in the previous build. The manual timezone check was deferred for lack of time;
+automated timezone contracts remain green. The Android TV notice check is deferred
+until the live server has a reachable HTTPS address. The current loopback notice
+URL is appropriate only for the local PC and was not changed in this increment.
+
+## Earlier selective-expiry checkpoint
+
 Expiry now follows per-addon **Disable on expiry** choices saved in the encrypted
 group revision. Publishing applies the choices to already expired members too;
 saving a draft alone remains passive. Existing configurations default to disabling

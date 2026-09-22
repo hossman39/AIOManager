@@ -349,6 +349,10 @@ export type ManagedPublicationPreview = z.infer<typeof publicationPreviewSchema>
 export type ManagedDeployment = z.infer<typeof deploymentSchema>
 export type ManagedGroupDraft = { name: string; addons: ManagedAddon[]; safeMode: boolean | null }
 export type ManagedPublication = { expectedVersion: number; receipt: string; allowEmpty: boolean }
+export type ManagedGroupChanges = ManagedGroupDraft & {
+  expectedVersion: number
+  allowEmpty: boolean
+}
 export type MembershipChange =
   | { mode: 'lifetime'; expectedVersion: number }
   | { mode: 'term'; expectedVersion: number; local: string; offset?: number; timezone?: string }
@@ -662,6 +666,17 @@ export function createManagedApi({
       }),
     publishGroup: (id: string, body: ManagedPublication, key: string, signal?: AbortSignal) =>
       request(`/groups/${encodeURIComponent(id)}/publish`, publicationResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    publishGroupChanges: (
+      id: string,
+      body: ManagedGroupChanges,
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/groups/${encodeURIComponent(id)}/publish-changes`, publicationResultSchema, {
         body,
         key,
         signal,

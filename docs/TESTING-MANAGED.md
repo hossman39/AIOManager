@@ -57,9 +57,14 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    **Sync & access**. On **Addons**, use **Check Stremio** to see the actual installed
    list and the email being checked. Then check the same Stremio login on Android, including
    order, names, catalogs and protected/default entries.
-5. On **Groups**, create a group, add addons, save its draft, preview and publish.
-   Use the account's **Group** tab to join it, or **Assign group** on Accounts for
-   a selection. Open one member and customize an addon: the other members and the
+5. On **Groups**, create a group, add addons, and click **Publish changes** once.
+   This saves the edits and queues sync for existing members together. In the open
+   group, choose **Add members**, search/select existing accounts, then **Add
+   selected members**. Confirm they appear in the member list. Accounts moved
+   from another group use the new group's shared addons and keep account-only
+   addons. Accounts whose sync has not started remain inactive. You can also use
+   the account's **Group** tab or **Assign group** on Accounts.
+   Open one member and customize an addon: the other members and the
    shared group must remain unchanged. Publish another group change; untouched
    addons follow it while that account's customizations remain. **Use group
    version** resets an individual addon override. Leave the group and confirm the
@@ -71,8 +76,8 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
 6. In the group editor, set **Disable on expiry** for each addon. For a typical
    setup, check Streams/AIOStreams and leave Cinemeta, AIOMetadata and subtitles
    unchecked. **Keep browsing addons** selects this using declared resources;
-   addons that also provide streams remain checked. Review the choices, **Save
-   draft → Preview publication → Publish group revision**. Old groups still
+   addons that also provide streams remain checked. Review the choices and click
+   **Publish changes**. Old groups still
    disable all addons until you publish an explicit choice. Individual accounts
    can make the same choices; group addons inherit the group's expiry settings
    even when their names or catalogs are customized for one account.

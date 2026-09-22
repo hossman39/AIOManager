@@ -493,6 +493,29 @@ test('ambiguous publication delivery does not retry automatically and exact retr
   assert.deepEqual(calls[0].body, payload)
 })
 
+test('one-call group publishing sends all edits together and preserves them on exact retry', async () => {
+  const calls: { key: string | null; body: unknown }[] = []
+  const api = createManagedApi({
+    ...auth,
+    fetch: async (url, options) => {
+      assert.equal(url, `/api/managed/groups/${groupId}/publish-changes`)
+      assert.equal(options?.method, 'POST')
+      const headers = new Headers(options?.headers)
+      assert.equal(headers.get('x-sync-password'), await deriveSyncToken(auth.password))
+      calls.push({ key: headers.get('idempotency-key'), body: JSON.parse(String(options?.body)) })
+      if (calls.length === 1) throw new Error('Synthetic response lost')
+      return reply({ ...groupPublication, replayed: true })
+    },
+  })
+  const changes = { ...groupDraft, expectedVersion: 1, allowEmpty: true }
+  const key = 'synthetic-one-call-publication'
+  await assert.rejects(api.publishGroupChanges(groupId, changes, key), { code: 'NETWORK_ERROR' })
+  assert.equal(calls.length, 1)
+  assert.equal((await api.publishGroupChanges(groupId, changes, key)).replayed, true)
+  assert.deepEqual(calls[0], { key, body: changes })
+  assert.deepEqual(calls[1], calls[0])
+})
+
 test('group client rejects incomplete configurations and contradictory rollout progress', async () => {
   let data: unknown
   const api = createManagedApi({ ...auth, fetch: async () => reply(data) })

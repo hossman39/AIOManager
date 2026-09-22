@@ -5,14 +5,13 @@ import {
   type createManagedApi,
   type ManagedGroup,
   type ManagedGroupSummary,
-  type ManagedGroupDraft,
-  type ManagedPublication,
-  type ManagedPublicationPreview,
+  type ManagedGroupChanges,
   type ManagedDeployment,
 } from '@/api/managed'
 import { AddonDraftError, checkedAddonDraft } from '@/lib/managed/addon-draft'
 import { ManagedAddonCards } from './ManagedAddonCards'
 import { DeleteGroupButton } from './DeleteGroupButton'
+import { ManagedGroupMembers } from './ManagedGroupMembers'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
 
 type Api = ReturnType<typeof createManagedApi>
@@ -22,9 +21,6 @@ const describe = (error: unknown) =>
     ? error.message
     : 'This operation could not be completed.'
 
-type EditorAction =
-  | { kind: 'save'; draft: ManagedGroupDraft & { expectedVersion: number } }
-  | { kind: 'publish'; publication: ManagedPublication }
 type EditorResult = {
   group: ManagedGroup
   deploymentId?: string
@@ -59,19 +55,14 @@ function GroupEditor({
   const [reading, setReading] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
-  const [preview, setPreview] = useState<ManagedPublicationPreview | null>(null)
   const [allowEmpty, setAllowEmpty] = useState(false)
   const alive = useRef(false)
   const abort = useRef<AbortController | null>(null)
   const readInFlight = useRef(false)
   const heading = useRef<HTMLHeadingElement>(null)
-  const mutation = useManagedSubmission<EditorAction, EditorResult>(
-    async (action, key, signal) => {
-      if (action.kind === 'save') {
-        const result = await api.saveGroupDraft(group.id, action.draft, key, signal)
-        return { group: result.replayed ? await api.group(group.id, signal) : result.group }
-      }
-      const result = await api.publishGroup(group.id, action.publication, key, signal)
+  const mutation = useManagedSubmission<ManagedGroupChanges, EditorResult>(
+    async (changes, key, signal) => {
+      const result = await api.publishGroupChanges(group.id, changes, key, signal)
       return {
         ...result,
         group: result.replayed ? await api.group(group.id, signal) : result.group,
@@ -82,19 +73,14 @@ function GroupEditor({
       setAddons(result.group.draft)
       setSafeMode(result.group.safeMode)
       setDirty(false)
-      setPreview(null)
       setAllowEmpty(false)
       onSaved(result)
     }
   )
-  const locked =
-    externalBusy ||
-    mutation.busy ||
-    mutation.uncertain ||
-    mutation.stale ||
-    resolving ||
-    reading ||
-    deleting
+  const editorBusy =
+    mutation.busy || mutation.uncertain || mutation.stale || resolving || reading || deleting
+  const locked = externalBusy || editorBusy
+  const empty = addons.every((addon) => addon.flags?.enabled === false)
   useUnsavedWarning(dirty || pendingUrl || resolving || mutation.busy || mutation.uncertain)
   useEffect(() => {
     alive.current = true
@@ -105,35 +91,15 @@ function GroupEditor({
     }
   }, [])
   useEffect(() => {
-    onLock(dirty || pendingUrl || locked)
+    onLock(dirty || pendingUrl || editorBusy)
     return () => onLock(false)
-  }, [dirty, pendingUrl, locked, onLock])
+  }, [dirty, pendingUrl, editorBusy, onLock])
   const changed = () => {
     setDirty(true)
-    setPreview(null)
     setAllowEmpty(false)
     setError('')
   }
 
-  const prepare = async () => {
-    if (locked || dirty || pendingUrl || readInFlight.current) return
-    readInFlight.current = true
-    const controller = new AbortController()
-    abort.current = controller
-    setReading(true)
-    setError('')
-    setPreview(null)
-    setAllowEmpty(false)
-    try {
-      const result = await api.previewGroupPublication(group.id, group.version, controller.signal)
-      if (alive.current) setPreview(result)
-    } catch (error) {
-      if (alive.current) setError(describe(error))
-    } finally {
-      readInFlight.current = false
-      if (alive.current) setReading(false)
-    }
-  }
   const reload = async () => {
     if (externalBusy || mutation.busy || mutation.uncertain || readInFlight.current || resolving)
       return
@@ -149,7 +115,7 @@ function GroupEditor({
         setAddons(latest.draft)
         setSafeMode(latest.safeMode)
         setDirty(false)
-        setPreview(null)
+        setAllowEmpty(false)
         setEditorEpoch((value) => value + 1)
         mutation.reset()
         onSaved({ group: latest })
@@ -161,17 +127,18 @@ function GroupEditor({
       if (alive.current) setReading(false)
     }
   }
-  const save = () => {
-    if (locked || pendingUrl || !dirty || !name.trim()) return
+  const publish = () => {
+    if (locked || pendingUrl || !name.trim() || (empty && !allowEmpty)) return
     try {
-      const draft = {
+      const changes = {
         name: name.trim(),
         addons: checkedAddonDraft(addons),
         safeMode,
         expectedVersion: group.version,
+        allowEmpty,
       }
       setError('')
-      void mutation.submit({ kind: 'save', draft })
+      void mutation.submit(changes)
     } catch (error) {
       setError(describe(error))
     }
@@ -191,11 +158,9 @@ function GroupEditor({
         Edit group: {group.name}
       </h4>
       <p className="text-sm text-muted-foreground">
-        Saved version {group.version} ·{' '}
         {group.publishedRevision === null
-          ? 'Not published'
-          : `Published revision ${group.publishedRevision}`}
-        . Draft saves do not publish addon changes.
+          ? 'Add your addons, then publish to make this group ready to use.'
+          : 'Publish changes to save your edits and sync them to group members.'}
       </p>
       <fieldset disabled={locked} className="min-w-0 space-y-3">
         <label className="block space-y-1 text-sm" htmlFor="managed-group-name">
@@ -228,8 +193,8 @@ function GroupEditor({
           </select>
         </label>
         <p className="text-xs text-muted-foreground">
-          Saved protection settings apply on the next sync. The expiry choices below also apply to
-          protected addons.
+          Publishing applies these settings to accounts with sync started. The expiry choices below
+          also apply to protected addons.
         </p>
       </fieldset>
       <ManagedAddonCards
@@ -237,7 +202,14 @@ function GroupEditor({
         addons={addons}
         expiryControls
         api={api}
-        disabled={externalBusy || mutation.busy || mutation.uncertain || mutation.stale || reading}
+        disabled={
+          externalBusy ||
+          mutation.busy ||
+          mutation.uncertain ||
+          mutation.stale ||
+          reading ||
+          deleting
+        }
         onBusyChange={setResolving}
         onPendingChange={setPendingUrl}
         onChange={(value) => {
@@ -253,34 +225,40 @@ function GroupEditor({
       {mutation.uncertain && (
         <div className="space-y-2 rounded border border-amber-500/40 p-3 text-sm">
           <p>
-            The submitted operation may already be saved. Its values are frozen; retry confirms that
-            same operation without duplicating it.
+            These changes may already be published. Retry to confirm the result without applying
+            them twice.
           </p>
           <Button type="button" disabled={mutation.busy} onClick={() => void mutation.retry()}>
-            Retry the same {mutation.pending?.kind === 'publish' ? 'publication' : 'draft save'}
+            Retry publication
           </Button>
         </div>
+      )}
+      {empty && (
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={allowEmpty}
+            disabled={locked}
+            onChange={(event) => setAllowEmpty(event.target.checked)}
+          />
+          <span>Publish this group with no enabled addons.</span>
+        </label>
       )}
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          disabled={locked || pendingUrl || !dirty || !name.trim()}
-          onClick={save}
+          disabled={locked || pendingUrl || !name.trim() || (empty && !allowEmpty)}
+          onClick={publish}
         >
-          Save draft
+          {mutation.busy ? 'Publishing…' : 'Publish changes'}
         </Button>
         <Button
           type="button"
           variant="outline"
-          disabled={locked || dirty || pendingUrl}
-          onClick={() => void prepare()}
-        >
-          {reading ? 'Preparing preview…' : 'Preview publication'}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={mutation.busy || mutation.uncertain || reading || resolving || deleting}
+          disabled={
+            externalBusy || mutation.busy || mutation.uncertain || reading || resolving || deleting
+          }
           onClick={() => void reload()}
         >
           {dirty || pendingUrl ? 'Discard edits & reload saved group' : 'Reload saved group'}
@@ -296,70 +274,8 @@ function GroupEditor({
       </div>
       {dirty && (
         <p role="status" className="text-sm">
-          Unsaved changes. Save this draft before preparing a publication.
+          Unpublished changes.
         </p>
-      )}
-      {preview && (
-        <div
-          className="space-y-3 rounded border p-3 text-sm"
-          aria-labelledby="group-publication-preview"
-        >
-          <h5 id="group-publication-preview" className="font-medium">
-            Publication preview
-          </h5>
-          <p>
-            {preview.changes.added} added · {preview.changes.removed} removed ·{' '}
-            {preview.changes.changed} changed{preview.changes.reordered ? ' · order changed' : ''}{' '}
-            in the group template.
-          </p>
-          <p>
-            {preview.counts.active} active targets · {preview.counts.suspended} expired/suspended
-            targets · {preview.counts.staged} staged · {preview.counts.offboarding} offboarding.
-          </p>
-          <p>
-            Active and expired users receive queued work. Expired accounts use the selected expiry
-            setup. Staged users are not activated; offboarding is not cancelled. Safe-mode effects
-            require a fresh account read during execution.
-          </p>
-          <p className="text-muted-foreground">
-            Preview expires {new Date(preview.expiresAt).toLocaleTimeString()}. Published changes
-            sync to active accounts when sync is running.
-          </p>
-          {preview.unchanged ? (
-            <p role="status">This addon setup is already published. No new rollout is needed.</p>
-          ) : (
-            <>
-              {preview.empty && (
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={allowEmpty}
-                    disabled={locked}
-                    onChange={(event) => setAllowEmpty(event.target.checked)}
-                  />
-                  <span>I intend to publish an empty or entirely disabled group setup.</span>
-                </label>
-              )}
-              <Button
-                type="button"
-                disabled={locked || pendingUrl || (preview.empty && !allowEmpty)}
-                onClick={() =>
-                  void mutation.submit({
-                    kind: 'publish',
-                    publication: {
-                      expectedVersion: preview.version,
-                      receipt: preview.receipt,
-                      allowEmpty,
-                    },
-                  })
-                }
-              >
-                Publish group revision
-              </Button>
-            </>
-          )}
-        </div>
       )}
       <DeleteGroupButton
         api={api}
@@ -417,7 +333,7 @@ function NewGroup({
           disabled={mutation.busy || mutation.uncertain || mutation.stale || !name.trim()}
           onClick={() => void mutation.submit({ name: name.trim() })}
         >
-          Create draft group
+          Create group
         </Button>
       </div>
       {mutation.message && (
@@ -459,7 +375,9 @@ export function ManagedGroupsPanel({
   const [selected, setSelected] = useState<ManagedGroup | null>(null)
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [selectionLocked, setSelectionLocked] = useState(false)
+  const [editorLocked, setEditorLocked] = useState(false)
+  const [membersLocked, setMembersLocked] = useState(false)
+  const selectionLocked = editorLocked || membersLocked
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [deployment, setDeployment] = useState<ManagedDeployment | null>(null)
@@ -584,11 +502,11 @@ export function ManagedGroupsPanel({
     if (result.deploymentId) {
       setNotice(
         result.unchanged
-          ? 'This revision was already published. No new jobs were queued.'
-          : `Group revision saved. ${result.queued ?? 0} sync jobs recorded. Follow the rollout status below.`
+          ? 'Group saved. Addons are already up to date.'
+          : `Changes published. ${result.queued ?? 0} account${result.queued === 1 ? '' : 's'} queued for sync.`
       )
       onAccountsChanged()
-    } else setNotice('Saved group loaded. Addon changes remain a draft until published.')
+    } else setNotice('Group ready. Edit addons and publish your changes.')
   }
 
   return (
@@ -618,7 +536,7 @@ export function ManagedGroupsPanel({
       )}
       {!selected && !creating && <Button onClick={() => setCreating(true)}>New group</Button>}
       {!selected && creating && (
-        <NewGroup api={api} onCreated={(group) => saved({ group })} onLock={setSelectionLocked} />
+        <NewGroup api={api} onCreated={(group) => saved({ group })} onLock={setEditorLocked} />
       )}
       {!selected && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-busy={loading}>
@@ -635,7 +553,7 @@ export function ManagedGroupsPanel({
               <span className="text-sm font-normal text-muted-foreground">
                 {group.addonCount} addons ·{' '}
                 {group.publishedRevision === null
-                  ? 'draft only'
+                  ? 'not published'
                   : `published revision ${group.publishedRevision}`}
               </span>
             </Button>
@@ -653,14 +571,25 @@ export function ManagedGroupsPanel({
         </Button>
       )}
       {selected && (
+        <ManagedGroupMembers
+          key={selected.id}
+          group={selected}
+          groups={groups}
+          api={api}
+          disabled={loading || editorLocked}
+          onLock={setMembersLocked}
+          onChanged={onAccountsChanged}
+        />
+      )}
+      {selected && (
         <GroupEditor
           key={`${selected.id}:${selected.version}`}
           group={selected}
           api={api}
           onSaved={saved}
           onClose={() => setSelected(null)}
-          onLock={setSelectionLocked}
-          externalBusy={loading}
+          onLock={setEditorLocked}
+          externalBusy={loading || membersLocked}
           onDeleted={(count) => {
             cancelReads()
             setGroups((previous) => previous.filter((group) => group.id !== selected.id))

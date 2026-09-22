@@ -24,6 +24,7 @@ const createInput = draftInput.extend({
   safeMode: z.boolean().nullable().default(null),
 })
 const saveInput = draftInput.extend({ expectedVersion: version })
+const publishChangesInput = saveInput.extend({ allowEmpty: z.boolean().default(false) })
 const personalInput = z.strictObject({ expectedVersion: version, addons: z.unknown() })
 const deleteInput = z.strictObject({ expectedVersion: version })
 const assignmentInput = z.strictObject({
@@ -152,6 +153,40 @@ export function createManagedGroupRepository({
     )
   }
 
+  async function saveDraftInTransaction(tx, owner, ownerRow, id, value, timestamp) {
+    const row = await group(tx, owner, id, true)
+    if (row.version !== value.expectedVersion) throw new ManagedError('VERSION_CONFLICT')
+    if (row.archived) throw new ManagedError('INVALID_STATE')
+    const old = {
+      name: crypto.open(row.name_enc, context(owner, id, 'group-name')),
+      addons: draft(row),
+      safeMode: row.safe_mode === null ? null : row.safe_mode === 1,
+    }
+    const next = { name: value.name, addons: value.addons, safeMode: value.safeMode }
+    if (same(owner, id, 'group-content', old, next))
+      return { group: publicGroup(row, ownerRow, true), replayed: false }
+    await tx.run(
+      'UPDATE managed_groups SET name_enc = $1, draft_enc = $2, safe_mode = $3, version = version + 1, updated_at = $4 WHERE owner_id = $5 AND id = $6',
+      [
+        crypto.seal(value.name, context(owner, id, 'group-name')),
+        crypto.seal(value.addons, context(owner, id, 'group-draft')),
+        value.safeMode === null ? null : Number(value.safeMode),
+        timestamp,
+        owner,
+        id,
+      ]
+    )
+    await audit(
+      tx,
+      owner,
+      'group.draft-saved',
+      id,
+      { version: row.version + 1, addonCount: value.addons.length, safeMode: value.safeMode },
+      timestamp
+    )
+    return { group: publicGroup(await group(tx, owner, id), ownerRow, true), replayed: false }
+  }
+
   return {
     ...createGroupPublicationRepository({
       db,
@@ -168,6 +203,11 @@ export function createManagedGroupRepository({
       layerGuard,
       publicGroup,
       audit,
+      saveDraftInTransaction,
+      parseChanges: (input) => {
+        const value = parse(publishChangesInput, input)
+        return { ...value, addons: checkedAddons(value.addons) }
+      },
     }),
     async createGroup(auth, input, key) {
       const value = parse(createInput, input)
@@ -203,37 +243,7 @@ export function createManagedGroupRepository({
       value.addons = checkedAddons(value.addons)
       return ownerTransaction(auth, (tx, owner, ownerRow, timestamp) =>
         idempotent(tx, owner, 'groups.draft', key, { id, ...value }, timestamp, async () => {
-          const row = await group(tx, owner, id, true)
-          if (row.version !== value.expectedVersion) throw new ManagedError('VERSION_CONFLICT')
-          if (row.archived) throw new ManagedError('INVALID_STATE')
-          const old = {
-            name: crypto.open(row.name_enc, context(owner, id, 'group-name')),
-            addons: draft(row),
-            safeMode: row.safe_mode === null ? null : row.safe_mode === 1,
-          }
-          const next = { name: value.name, addons: value.addons, safeMode: value.safeMode }
-          if (same(owner, id, 'group-content', old, next))
-            return { group: publicGroup(row, ownerRow, true), replayed: false }
-          await tx.run(
-            'UPDATE managed_groups SET name_enc = $1, draft_enc = $2, safe_mode = $3, version = version + 1, updated_at = $4 WHERE owner_id = $5 AND id = $6',
-            [
-              crypto.seal(value.name, context(owner, id, 'group-name')),
-              crypto.seal(value.addons, context(owner, id, 'group-draft')),
-              value.safeMode === null ? null : Number(value.safeMode),
-              timestamp,
-              owner,
-              id,
-            ]
-          )
-          await audit(
-            tx,
-            owner,
-            'group.draft-saved',
-            id,
-            { version: row.version + 1, addonCount: value.addons.length, safeMode: value.safeMode },
-            timestamp
-          )
-          return { group: publicGroup(await group(tx, owner, id), ownerRow, true), replayed: false }
+          return saveDraftInTransaction(tx, owner, ownerRow, id, value, timestamp)
         })
       )
     },

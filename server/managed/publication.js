@@ -60,6 +60,8 @@ export function createGroupPublicationRepository({
   layerGuard,
   publicGroup,
   audit,
+  parseChanges,
+  saveDraftInTransaction,
 }) {
   const digest = (owner, id, value, purpose = 'group-payload') =>
     crypto.fingerprint(value, context(owner, id, purpose))
@@ -148,7 +150,176 @@ export function createGroupPublicationRepository({
     }
   }
 
+  async function commitPublication(tx, owner, ownerRow, id, state, allowEmpty, timestamp) {
+    if (state.unchanged) {
+      const existing = await tx.get(
+        'SELECT id FROM managed_deployments WHERE owner_id = $1 AND group_id = $2 AND revision = $3',
+        [owner, id, state.row.published_revision]
+      )
+      if (!existing) throw new ManagedError('DATA_UNREADABLE')
+      return {
+        group: publicGroup(state.row, ownerRow, true),
+        deploymentId: existing.id,
+        revision: state.row.published_revision,
+        queued: 0,
+        unchanged: true,
+        replayed: false,
+      }
+    }
+    if (state.empty && !allowEmpty) throw new ManagedError('EMPTY_PUBLICATION_CONFIRMATION')
+    const revision = (state.row.published_revision ?? 0) + 1
+    const deploymentId = randomUUID()
+    await tx.run(
+      'INSERT INTO managed_group_revisions (owner_id, group_id, revision, config_enc, payload_digest, explicit_empty, published_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [
+        owner,
+        id,
+        revision,
+        crypto.seal(state.addons, context(owner, id, `group-revision:${revision}`)),
+        state.binding.payloadDigest,
+        Number(state.empty),
+        timestamp,
+      ]
+    )
+    await tx.run(
+      'UPDATE managed_groups SET published_revision = $1, version = version + 1, updated_at = $2 WHERE owner_id = $3 AND id = $4',
+      [revision, timestamp, owner, id]
+    )
+    const cohort = []
+    for (const account of state.members) {
+      if (account.state !== 'active') continue
+      await tx.run(
+        'UPDATE managed_accounts SET policy_version = policy_version + 1, record_version = record_version + 1, updated_at = $1 WHERE owner_id = $2 AND id = $3',
+        [timestamp, owner, account.id]
+      )
+      const updated = {
+        ...account,
+        policy_version: account.policy_version + 1,
+        record_version: account.record_version + 1,
+        updated_at: timestamp,
+      }
+      const job = await jobs.enqueueInTransaction(tx, updated, 'publish', timestamp)
+      cohort.push({
+        accountId: account.id,
+        jobId: job.id,
+        policyVersion: updated.policy_version,
+        target: job.target,
+      })
+    }
+    await tx.run(
+      'INSERT INTO managed_deployments (id, owner_id, group_id, revision, cohort_enc, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        deploymentId,
+        owner,
+        id,
+        revision,
+        crypto.seal(
+          {
+            members: cohort,
+            skipped: { staged: state.counts.staged, offboarding: state.counts.offboarding },
+          },
+          context(owner, deploymentId, 'deployment-cohort')
+        ),
+        timestamp,
+      ]
+    )
+    await audit(
+      tx,
+      owner,
+      'group.published',
+      id,
+      {
+        deploymentId,
+        revision,
+        counts: state.counts,
+        queued: cohort.length,
+        explicitEmpty: state.empty,
+      },
+      timestamp
+    )
+    return {
+      group: publicGroup(await group(tx, owner, id), ownerRow, true),
+      deploymentId,
+      revision,
+      queued: cohort.length,
+      unchanged: false,
+      replayed: false,
+    }
+  }
+
   const repository = {
+    async publishGroupChanges(auth, id, input, key, { signal } = {}) {
+      const value = parseChanges(input)
+      const owner = await authorize(auth)
+      const scope = 'groups.publish-changes'
+      if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(key))
+        throw new ManagedError('IDEMPOTENCY_KEY_REQUIRED')
+      // Confirm accepted retries before doing network work or checking the old
+      // version. The transactional idempotency check below also handles races.
+      const previous = await db.get(
+        'SELECT request_digest, response_enc FROM managed_idempotency WHERE owner_id = $1 AND scope = $2 AND request_key = $3',
+        [owner, scope, key]
+      )
+      if (previous) {
+        if (
+          !equalSecret(
+            previous.request_digest,
+            crypto.fingerprint({ id, ...value }, context(owner, scope, 'request'))
+          )
+        )
+          throw new ManagedError('IDEMPOTENCY_CONFLICT')
+        return {
+          ...crypto.open(
+            previous.response_enc,
+            context(owner, `${scope}:${key}`, 'idempotency-response')
+          ),
+          replayed: true,
+        }
+      }
+      await group(db, owner, id)
+      requireValidator()
+      try {
+        if ((await validateManifests(structuredClone(value.addons), { signal })) !== true)
+          throw new Error('No validation confirmation')
+      } catch (error) {
+        if (error instanceof ManagedError && error.code.startsWith('MANIFEST_')) throw error
+        throw new ManagedError('MANIFEST_UNAVAILABLE')
+      }
+      signal?.throwIfAborted()
+      return ownerTransaction(auth, (tx, currentOwner, ownerRow, timestamp) =>
+        idempotent(tx, currentOwner, scope, key, { id, ...value }, timestamp, async () => {
+          const before = await group(tx, currentOwner, id, true)
+          const saved = await saveDraftInTransaction(
+            tx,
+            currentOwner,
+            ownerRow,
+            id,
+            value,
+            timestamp
+          )
+          const state = await snapshot(
+            tx,
+            currentOwner,
+            ownerRow,
+            id,
+            saved.group.version,
+            timestamp
+          )
+          // A protection-only edit also needs to reach existing members.
+          if (before.safe_mode !== (value.safeMode === null ? null : Number(value.safeMode)))
+            state.unchanged = false
+          return commitPublication(
+            tx,
+            currentOwner,
+            ownerRow,
+            id,
+            state,
+            value.allowEmpty,
+            timestamp
+          )
+        })
+      )
+    },
     async previewGroupPublication(auth, id, input, { signal } = {}) {
       const value = parse(previewInput, input)
       const owner = await authorize(auth)
@@ -224,101 +395,7 @@ export function createGroupPublicationRepository({
             )
           )
             throw new ManagedError('PREVIEW_STALE')
-          if (state.unchanged) {
-            const existing = await tx.get(
-              'SELECT id FROM managed_deployments WHERE owner_id = $1 AND group_id = $2 AND revision = $3',
-              [owner, id, state.row.published_revision]
-            )
-            if (!existing) throw new ManagedError('DATA_UNREADABLE')
-            return {
-              group: publicGroup(state.row, ownerRow, true),
-              deploymentId: existing.id,
-              revision: state.row.published_revision,
-              queued: 0,
-              unchanged: true,
-              replayed: false,
-            }
-          }
-          if (state.empty && !value.allowEmpty)
-            throw new ManagedError('EMPTY_PUBLICATION_CONFIRMATION')
-          const revision = (state.row.published_revision ?? 0) + 1
-          const deploymentId = randomUUID()
-          await tx.run(
-            'INSERT INTO managed_group_revisions (owner_id, group_id, revision, config_enc, payload_digest, explicit_empty, published_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-            [
-              owner,
-              id,
-              revision,
-              crypto.seal(state.addons, context(owner, id, `group-revision:${revision}`)),
-              state.binding.payloadDigest,
-              Number(state.empty),
-              timestamp,
-            ]
-          )
-          await tx.run(
-            'UPDATE managed_groups SET published_revision = $1, version = version + 1, updated_at = $2 WHERE owner_id = $3 AND id = $4',
-            [revision, timestamp, owner, id]
-          )
-          const cohort = []
-          for (const account of state.members) {
-            if (account.state !== 'active') continue
-            await tx.run(
-              'UPDATE managed_accounts SET policy_version = policy_version + 1, record_version = record_version + 1, updated_at = $1 WHERE owner_id = $2 AND id = $3',
-              [timestamp, owner, account.id]
-            )
-            const updated = {
-              ...account,
-              policy_version: account.policy_version + 1,
-              record_version: account.record_version + 1,
-              updated_at: timestamp,
-            }
-            const job = await jobs.enqueueInTransaction(tx, updated, 'publish', timestamp)
-            cohort.push({
-              accountId: account.id,
-              jobId: job.id,
-              policyVersion: updated.policy_version,
-              target: job.target,
-            })
-          }
-          await tx.run(
-            'INSERT INTO managed_deployments (id, owner_id, group_id, revision, cohort_enc, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-            [
-              deploymentId,
-              owner,
-              id,
-              revision,
-              crypto.seal(
-                {
-                  members: cohort,
-                  skipped: { staged: state.counts.staged, offboarding: state.counts.offboarding },
-                },
-                context(owner, deploymentId, 'deployment-cohort')
-              ),
-              timestamp,
-            ]
-          )
-          await audit(
-            tx,
-            owner,
-            'group.published',
-            id,
-            {
-              deploymentId,
-              revision,
-              counts: state.counts,
-              queued: cohort.length,
-              explicitEmpty: state.empty,
-            },
-            timestamp
-          )
-          return {
-            group: publicGroup(await group(tx, owner, id), ownerRow, true),
-            deploymentId,
-            revision,
-            queued: cohort.length,
-            unchanged: false,
-            replayed: false,
-          }
+          return commitPublication(tx, owner, ownerRow, id, state, value.allowEmpty, timestamp)
         })
       )
     },

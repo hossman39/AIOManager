@@ -103,6 +103,7 @@ test('every managed API requires server-verified owner credentials', async (t) =
         payload: { expectedVersion: 1 },
       },
       { method: 'POST', url: `/api/managed/groups/${randomUUID()}/publish`, payload: {} },
+      { method: 'POST', url: `/api/managed/groups/${randomUUID()}/publish-changes`, payload: {} },
       { method: 'GET', url: `/api/managed/deployments/${randomUUID()}` },
       { method: 'GET', url: `/api/managed/groups/${randomUUID()}/deployment` },
       { method: 'POST', url: '/api/managed/accounts/assign-group', payload: {} },
@@ -530,6 +531,63 @@ test('manifest resolve HTTP is authenticated, read-only, bounded and redacts fai
     'managed_jobs',
   ])
     assert.equal((await db.get(`SELECT COUNT(*) AS count FROM ${table}`)).count, 0)
+  assert.equal(networkCalls(), 0)
+})
+
+test('one-call publishing HTTP persists edits and replays after restart without manifest access', async (t) => {
+  let offline = false
+  let reads = 0
+  const { app, db, start, networkCalls } = await fixture(t, {
+    resolve: fakePublicDns,
+    read: async () => {
+      reads++
+      if (offline) throw new Error('Synthetic offline manifest')
+      return fakeManifestResponse()
+    },
+  })
+  const group = (await app.inject(managedPost('/groups', { name: 'Before edits' }))).json().group
+  const changes = {
+    expectedVersion: group.version,
+    name: 'Published edits',
+    safeMode: false,
+    addons: [enabledFixtureAddon()],
+    allowEmpty: false,
+  }
+  const request = managedPost(`/groups/${group.id}/publish-changes`, changes)
+  const result = await app.inject(request)
+  assert.equal(result.statusCode, 201, result.body)
+  assert.equal(result.json().group.name, changes.name)
+  assert.deepEqual(result.json().group.draft, changes.addons)
+  assert.equal(result.json().revision, 1)
+  assert.equal(result.json().queued, 0)
+  assert.equal(result.headers['cache-control'], 'no-store')
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_group_revisions')).count, 1)
+  assert.equal(reads, 1)
+  await app.close()
+  offline = true
+  const restarted = await start()
+  const retry = await restarted.app.inject(request)
+  assert.equal(retry.statusCode, 200, retry.body)
+  assert.deepEqual(retry.json(), { ...result.json(), replayed: true })
+  assert.equal(reads, 1)
+  const denied = await restarted.app.inject({
+    ...request,
+    headers: { ...headers(secondAuth), 'idempotency-key': randomUUID() },
+  })
+  assert.equal(denied.statusCode, 404)
+  assert.equal(reads, 1)
+  const failed = await restarted.app.inject(
+    managedPost(`/groups/${group.id}/publish-changes`, {
+      ...changes,
+      name: 'Must not save',
+      expectedVersion: result.json().group.version,
+    })
+  )
+  assert.equal(failed.statusCode, 422, failed.body)
+  const current = (
+    await restarted.app.inject({ url: `/api/managed/groups/${group.id}`, headers: headers() })
+  ).json()
+  assert.deepEqual(current, result.json().group)
   assert.equal(networkCalls(), 0)
 })
 
