@@ -27,8 +27,8 @@ same source-group check. Exact retries preserve the original request and do not
 repeat updates; stale selections require a reload. Individual membership and sync
 use the same transaction helpers as the new bulk operations.
 
-Local validation: 340 runnable tests pass, with 136 PostgreSQL contracts awaiting
-the hosted run. Typecheck, lint and build pass. New shared contracts cover timezone
+Local validation: 340 runnable tests pass, and all 136 PostgreSQL contracts pass in
+hosted CI. Typecheck, lint and build pass. New shared contracts cover timezone
 cutoffs, clock changes, concurrent retries, ownership, stale/moved members,
 offboarding, atomic rollback, staged accounts and expired sync targets.
 
@@ -42,6 +42,14 @@ No real provider requests were used in these tests.
 
 The user accepted one-click publishing in the previous build. The Android TV
 notice remains deferred until the live server has a reachable HTTPS address.
+
+The dedicated local test instance preserves its database and encryption key and
+serves `index-BH54vGo4.js` on port 1611. A pre-update SQLite copy retaining encrypted
+records is outside version control. The restarted writer is ready, the expiry scan
+is current, and no pending, running or retrying jobs remained at the local check.
+Code checkpoint `caae947` passed all five hosted checks in
+[run 35685554151](https://github.com/hossman39/AIOManager/actions/runs/35685554151):
+Windows/Linux validation, PostgreSQL contracts, and AMD64/ARM64 containers.
 
 ## Earlier group-publishing checkpoint
 
