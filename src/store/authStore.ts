@@ -20,7 +20,7 @@ interface AuthStore {
   encryptionKey: CryptoKey | null
 
   initialize: () => Promise<void>
-  setupMasterPassword: (password: string) => Promise<void>
+  setupMasterPassword: (password: string, salt?: Uint8Array) => Promise<void>
   unlock: (password: string) => Promise<boolean>
   lock: () => void
   resetMasterPassword: (password: string) => Promise<void>
@@ -40,8 +40,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     const passwordSet = isPasswordSetup()
 
     if (!passwordSet) {
-      // No password set yet - not locked
-      set({ isLocked: false })
+      // An empty browser has no usable encryption key yet.
+      set({ encryptionKey: null, isLocked: true })
       return
     }
 
@@ -56,7 +56,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       })
     } else {
       // No session key - user needs to unlock
-      set({ isLocked: true })
+      set({ encryptionKey: null, isLocked: true })
 
       // Critical: If we have an existing session key in storage but it failed to load,
       // or if we are just starting up, we must ensure we don't accidentally leave it unlocked.
@@ -69,7 +69,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
    * Generates salt, hashes password, stores both, and derives encryption key
    * Wipes any existing data to prevent decryption issues
    */
-  setupMasterPassword: async (password: string) => {
+  setupMasterPassword: async (password: string, registrationSalt?: Uint8Array) => {
     if (password.length < 8) {
       throw new Error('Password must be at least 8 characters')
     }
@@ -79,7 +79,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     resetAllStores()
 
     // Generate and save salt
-    const salt = generateSalt()
+    const salt = registrationSalt ?? generateSalt()
     saveSalt(salt)
 
     // Hash and save password

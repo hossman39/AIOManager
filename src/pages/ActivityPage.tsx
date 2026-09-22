@@ -114,7 +114,7 @@ export function ActivityPage() {
             if (indexB === -1) return -1
             return indexA - indexB
         })
-    }, [history, orderedAccounts])
+    }, [history, orderedAccounts, accounts])
 
     // Filter history based on search, user filter and time filter
     const filteredHistory = useMemo(() => {

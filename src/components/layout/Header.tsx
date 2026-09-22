@@ -3,8 +3,9 @@ import { motion } from 'framer-motion'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSyncStore } from '@/store/syncStore'
 import { useFailoverStore } from '@/store/failoverStore'
-import { LogOut, LayoutDashboard, Package, Activity, BarChart3, Settings, HelpCircle, Zap, ZapOff, ShieldCheck, ExternalLink } from 'lucide-react'
+import { LogOut, LayoutDashboard, Package, Activity, BarChart3, Settings, HelpCircle, Zap, ZapOff, ShieldCheck, ExternalLink, UsersRound } from 'lucide-react'
 import { SyncStatus } from '@/components/SyncStatus'
+import { useGuardedLeave } from '@/components/common/UnsavedWorkGuard'
 import { useVaultStore } from '@/store/vaultStore'
 import { useProviderStore } from '@/store/providerStore'
 import { PROVIDERS } from '@/lib/constants'
@@ -19,6 +20,7 @@ export function Header() {
   const { theme } = useTheme()
   const isInverted = theme === 'light' || theme === 'hoth'
   const { auth, logout } = useSyncStore()
+  const guardedLeave = useGuardedLeave()
   const { rules, lastWorkerRun } = useFailoverStore()
 
   const { keys } = useVaultStore()
@@ -61,7 +63,7 @@ export function Header() {
   }
 
   return (
-    <header className="border-b bg-card/95 sticky top-0 z-50">
+    <header className="border-b bg-card/95 relative z-40">
       <div className="container mx-auto px-4 py-4 md:py-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center justify-between w-full md:w-auto">
@@ -87,7 +89,7 @@ export function Header() {
                 type="button"
                 onClick={(e) => {
                   e.preventDefault();
-                  logout();
+                  guardedLeave(logout);
                 }}
                 className="md:hidden text-muted-foreground hover:text-destructive transition-colors p-2 rounded-md hover:bg-muted"
                 title="Logout"
@@ -188,7 +190,7 @@ export function Header() {
             )}
 
             {/* Autopilot Status Badge */}
-            <div
+            {hasRules && <div
               className={`flex items-center gap-1.5 px-3 py-1 rounded-full border shadow-sm transition-all cursor-help ${statusColor}`}
               title={
                 !isServerLive ? 'Autopilot Server is offline or heartbeat lost' :
@@ -210,7 +212,7 @@ export function Header() {
               <span className="text-[10px] font-bold uppercase tracking-widest whitespace-nowrap">
                 Autopilot: {autopilotStatus}
               </span>
-            </div>
+            </div>}
 
             <SyncStatus />
 
@@ -232,7 +234,7 @@ export function Header() {
                 <div className="h-4 w-px bg-border mx-0.5" />
                 <button
                   type="button"
-                  onClick={(e) => { e.preventDefault(); logout(); }}
+                  onClick={(e) => { e.preventDefault(); guardedLeave(logout); }}
                   className="text-muted-foreground/50 hover:text-destructive transition-colors p-0.5"
                   title="Logout"
                 >
@@ -253,6 +255,9 @@ export function Header() {
           >
             <LayoutDashboard className="h-3.5 w-3.5" />
             <span className="text-[13px]">Accounts</span>
+          </Link>
+          <Link to="/groups" className={`pb-2 px-3 border-b-2 transition-colors shrink-0 flex items-center gap-2 ${location.pathname === '/groups' ? 'border-primary text-foreground font-semibold' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+            <UsersRound className="h-3.5 w-3.5" /><span className="text-[13px]">Groups</span>
           </Link>
           <Link
             to="/saved-addons"
@@ -327,6 +332,7 @@ export function Header() {
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur-lg border-t border-border flex items-center justify-around min-h-[76px] pb-[calc(env(safe-area-inset-bottom,0px)+8px)] shadow-[0_-10px_40px_rgba(0,0,0,0.15)]">
         {[
           { to: '/', icon: LayoutDashboard, label: 'Accounts' },
+          { to: '/groups', icon: UsersRound, label: 'Groups' },
           { to: '/saved-addons', icon: Package, label: 'Addons' },
           { to: '/activity', icon: Activity, label: 'Activity' },
           { to: '/metrics', icon: BarChart3, label: 'Metrics' },

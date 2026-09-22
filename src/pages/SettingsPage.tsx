@@ -1,4 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { AccountSyncSettings } from '@/components/settings/AccountSyncSettings'
+import { IntegrationSettings } from '@/components/settings/IntegrationSettings'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useAccountStore } from '@/store/accountStore'
 import { useAddonStore } from '@/store/addonStore'
@@ -27,7 +30,8 @@ import {
     Settings2,
     EyeOff,
     Download,
-    Upload
+    Upload,
+    RefreshCw
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -43,6 +47,8 @@ import { ThemeSection } from '@/components/settings/ThemeSection'
 import { DangerZone } from '@/components/settings/DangerZone'
 
 export function SettingsPage() {
+    const location = useLocation()
+    const navigate = useNavigate()
     const { theme, setTheme } = useTheme()
     const { accounts, exportAccounts, importAccounts } = useAccountStore()
     const { initialize: initializeAddonStore } = useAddonStore()
@@ -50,24 +56,13 @@ export function SettingsPage() {
     const { isPrivacyModeEnabled, togglePrivacyMode } = useUIStore()
     const { clear: clearLibraryCache } = useLibraryCache()
 
-    const [activeTab, setActiveTab] = useState(() => {
-        const hash = window.location.hash.replace('#', '')
-        if (['general', 'appearance', 'data', 'advanced'].includes(hash)) {
-            return hash
-        }
-        return 'general'
-    })
+    const hash = location.hash.replace('#', '')
+    const activeTab = ['general', 'account-sync', 'integrations', 'appearance', 'data', 'advanced'].includes(hash) ? hash : 'general'
 
     const handleTabChange = (val: string) => {
-        setActiveTab(val)
-        window.history.replaceState(null, '', `#${val}`)
+        navigate({ pathname: location.pathname, search: location.search, hash: `#${val}` }, { replace: true })
     }
 
-    useEffect(() => {
-        return () => {
-            window.history.replaceState(null, '', window.location.pathname)
-        }
-    }, [])
 
     const [confirmDialog, setConfirmDialog] = useState<{
         open: boolean
@@ -176,6 +171,12 @@ export function SettingsPage() {
                     <TabsTrigger value="appearance" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-full px-4 border border-border/50 data-[state=active]:border-transparent bg-muted/30 shrink-0 shadow-sm transition-all">
                         <Palette className="h-3.5 w-3.5 mr-2" />Appearance
                     </TabsTrigger>
+                    <TabsTrigger value="account-sync" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-full px-4 border border-border/50 data-[state=active]:border-transparent bg-muted/30 shrink-0 shadow-sm transition-all">
+                        <RefreshCw className="h-3.5 w-3.5 mr-2" />Account sync
+                    </TabsTrigger>
+                    <TabsTrigger value="integrations" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-full px-4 border border-border/50 data-[state=active]:border-transparent bg-muted/30 shrink-0 shadow-sm transition-all">
+                        API integrations
+                    </TabsTrigger>
                     <TabsTrigger value="data" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-full px-4 border border-border/50 data-[state=active]:border-transparent bg-muted/30 shrink-0 shadow-sm transition-all">
                         <Database className="h-3.5 w-3.5 mr-2" />Data & Sync
                     </TabsTrigger>
@@ -185,7 +186,14 @@ export function SettingsPage() {
                 </TabsList>
 
                 <div className="mt-8">
+                    <TabsContent value="account-sync" className="mt-0">
+                        <AccountSyncSettings />
+                    </TabsContent>
                     {/* General Tab */}
+                    <TabsContent value="integrations" className="mt-0">
+                        <IntegrationSettings />
+                    </TabsContent>
+
                     <TabsContent value="general" className="mt-0">
                         <div className="grid gap-6">
                             <AccountSection />

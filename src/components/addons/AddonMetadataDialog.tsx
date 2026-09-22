@@ -20,6 +20,7 @@ interface AddonMetadataDialogProps {
     accountId: string
     onSave: (metadata: { customName?: string; customLogo?: string; customDescription?: string }) => Promise<void>
     onReplaceUrl?: (newUrl: string) => Promise<void>
+    draftOnly?: boolean
 }
 
 export function AddonMetadataDialog({
@@ -29,6 +30,7 @@ export function AddonMetadataDialog({
     accountId,
     onSave,
     onReplaceUrl,
+    draftOnly = false,
 }: AddonMetadataDialogProps) {
     const [customName, setCustomName] = useState('')
     const [customLogo, setCustomLogo] = useState('')
@@ -292,7 +294,7 @@ export function AddonMetadataDialog({
                             Cancel
                         </Button>
                         <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto">
-                            {saving ? 'Syncing...' : 'Save & Sync'}
+                            {saving ? 'Saving...' : draftOnly ? 'Apply to draft' : 'Save & Sync'}
                         </Button>
                     </div>
                 </DialogFooter>

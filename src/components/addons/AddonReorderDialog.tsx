@@ -36,6 +36,7 @@ interface AddonReorderDialogProps {
   addons: AddonDescriptor[]
   open: boolean
   onOpenChange: (open: boolean) => void
+  onSave?: (addons: AddonDescriptor[]) => Promise<void>
 }
 
 export function AddonReorderDialog({
@@ -43,6 +44,7 @@ export function AddonReorderDialog({
   addons,
   open,
   onOpenChange,
+  onSave,
 }: AddonReorderDialogProps) {
   const [items, setItems] = useState<(AddonDescriptor & { uniqueId: string })[]>([])
   const [saving, setSaving] = useState(false)
@@ -91,7 +93,9 @@ export function AddonReorderDialog({
     setSaving(true)
     setError(null)
     try {
-      await reorderAddons(accountId, items)
+      const ordered = items.map(({ uniqueId: _uniqueId, ...addon }) => addon)
+      if (onSave) await onSave(ordered)
+      else await reorderAddons(accountId, ordered)
       onOpenChange(false)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save addon order'
@@ -111,7 +115,7 @@ export function AddonReorderDialog({
         <DialogHeader>
           <DialogTitle>Reorder Addons</DialogTitle>
           <DialogDescription>
-            Drag and drop to reorder your addons. Changes will be saved to Stremio.
+            {onSave ? 'Drag and drop to reorder your addons. Save the setup to apply this order.' : 'Drag and drop to reorder your addons. Changes will be saved to Stremio.'}
           </DialogDescription>
         </DialogHeader>
 

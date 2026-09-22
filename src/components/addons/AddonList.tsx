@@ -259,7 +259,7 @@ export function AddonList({ accountId }: AddonListProps) {
     } finally {
       setCheckingUpdates(false)
     }
-  }, [account, encryptionKey, addons, toast, updateLatestVersions, syncAccount, accountId, checkRules, pullServerState])
+  }, [account, encryptionKey, addons, toast, updateLatestVersions, syncAccount, accountId, checkRules, pullServerState, checkingUpdates])
 
   const handleUpdateAddon = useCallback(
     async (_accountId: string, transportUrl: string) => {

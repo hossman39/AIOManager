@@ -497,7 +497,7 @@ export const useFailoverStore = create<FailoverStore>((set, get) => ({
         get().checkRules()
         console.log('[Failover] Starting automation engine...')
         set({ isMonitoring: true })
-        automationInterval = setInterval(() => {
+        automationInterval = window.setInterval(() => {
             if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
             get().pullServerState()
             get().checkRules()

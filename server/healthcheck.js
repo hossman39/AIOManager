@@ -1,7 +1,7 @@
 import http from 'http';
 
 const options = {
-    host: 'localhost',
+    host: '127.0.0.1',
     port: process.env.PORT || 1610,
     path: '/api/health',
     timeout: 2000
@@ -19,6 +19,10 @@ const request = http.request(options, (res) => {
 request.on('error', (err) => {
     console.error(`ERROR: ${err.message}`);
     process.exit(1);
+});
+
+request.on('timeout', () => {
+    request.destroy(new Error('Health check timed out'));
 });
 
 request.end();

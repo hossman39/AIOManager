@@ -1,0 +1,18 @@
+name: aiomanager-managed-test
+services:
+  manager:
+    build: .
+    image: aiomanager-managed-test:local
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:1611:1610'
+    environment:
+      DB_TYPE: sqlite
+      DATA_DIR: /app/data
+      MANAGED_WRITES_ENABLED: 'true'
+      MANAGED_BACKUPS_ENABLED: 'true'
+      LOG_PRETTY_PRINT: 'false'
+    volumes:
+      - managed-test-data:/app/data
+volumes:
+  managed-test-data:

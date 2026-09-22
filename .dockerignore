@@ -1,10 +1,23 @@
 # Build artifacts
 dist
 node_modules
+**/node_modules
+data
+server/data
+aio-data
+aio-db-data
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.key
+**/*.pem
+**/*.secret
+coverage
 
 # Development files
 .git
 .gitignore
+.github
 .vscode
 .husky
 *.log

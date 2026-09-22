@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "accounts": [
+    { "email": "First@example.invalid", "password": " synthetic-password-one ", "name": "Ignored name", "addons": [{ "url": "https://ignored.invalid/secret/manifest.json" }] },
+    { "email": "second@example.invalid", "password": "synthetic-password-two" },
+    { "email": "FIRST@example.invalid", "password": " synthetic-password-one " },
+    { "email": "missing@example.invalid" },
+    { "email": "conflict@example.invalid", "password": "synthetic-a" },
+    { "email": "conflict@example.invalid", "password": "synthetic-b" }
+  ],
+  "autopilotRules": [{ "active": true, "authKey": "ignored-synthetic" }]
+}

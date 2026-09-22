@@ -169,7 +169,7 @@ export function SavedAddonLibrary() {
     } finally {
       setCheckingUpdates(false)
     }
-  }, [savedAddons, toast, updateLatestVersions])
+  }, [savedAddons, toast, updateLatestVersions, checkingUpdates])
 
   const handleUpdateSavedAddon = useCallback(
     async (savedAddonId: string, addonName: string) => {

@@ -1,6 +1,8 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AccountsPage } from '@/pages/AccountsPage'
 import { AccountDetailPage } from '@/pages/AccountDetailPage'
+import { GroupsPage } from '@/pages/GroupsPage'
+import { AccountImportPage } from '@/pages/AccountImportPage'
 import { SavedAddonsPage } from '@/pages/SavedAddonsPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
@@ -13,12 +15,16 @@ const ReplayPage = lazy(() => import('@/pages/ReplayPage').then(m => ({ default:
 const ReplaySharePage = lazy(() => import('@/pages/ReplaySharePage').then(m => ({ default: m.ReplaySharePage })))
 const ActivityPage = lazy(() => import('@/pages/ActivityPage').then(m => ({ default: m.ActivityPage })))
 const MetricsPage = lazy(() => import('@/pages/MetricsPage').then(m => ({ default: m.MetricsPage })))
-
 export function AppRoutes() {
+  const location = useLocation()
   return (
     <Routes>
       <Route path="/" element={<AccountsPage />} />
+      <Route path="/groups" element={<GroupsPage />} />
+      <Route path="/accounts/import" element={<AccountImportPage />} />
+      <Route path="/accounts/sync-settings" element={<Navigate to={`/settings${location.search}#account-sync`} replace />} />
       <Route path="/saved-addons" element={<SavedAddonsPage />} />
+      <Route path="/managed" element={<Navigate to={`/${location.search}${location.hash}`} replace />} />
 
       <Route path="/activity" element={
         <ErrorBoundary>

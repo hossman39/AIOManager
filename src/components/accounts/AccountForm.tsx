@@ -56,22 +56,15 @@ export function AccountForm() {
   const [emojiSearch, setEmojiSearch] = useState('')
 
   useEffect(() => {
+    setPassword('')
+    setAuthKey('')
+    setError('')
     if (editingAccount) {
       setName(editingAccount.name)
-      if (editingAccount.email) {
-        setMode('credentials')
-        setEmail(editingAccount.email)
-        // We can't decrypt the password to show it, but we can set a placeholder or just leave it blank
-        // For simplicity in update, we leave it blank. If they enter content, we update it.
-        setAccentColor(editingAccount.accentColor)
-        setEmoji(editingAccount.emoji || '')
-      } else {
-        setMode('authKey')
-        setAccentColor(editingAccount.accentColor)
-        setEmoji(editingAccount.emoji || '')
-        // Don't show existing auth key for security
-        setAuthKey('')
-      }
+      setMode('credentials')
+      setEmail(editingAccount.email || '')
+      setAccentColor(editingAccount.accentColor)
+      setEmoji(editingAccount.emoji || '')
     } else {
       // Reset defaults for add mode
       setMode('credentials')
@@ -171,7 +164,6 @@ export function AccountForm() {
             </TabsList>
 
             <TabsContent value="account" className="space-y-4 animate-in fade-in slide-in-from-left-2 duration-300">
-              {!isEditing && (
                 <div className="flex gap-2 border-b border-border/10 pb-3">
                   <Button
                     type="button"
@@ -185,7 +177,7 @@ export function AccountForm() {
                   >
                     Email & Password
                   </Button>
-                  <Button
+                  {!isEditing && <Button
                     type="button"
                     variant={mode === 'oauth' ? 'default' : 'ghost'}
                     size="sm"
@@ -196,7 +188,7 @@ export function AccountForm() {
                     }}
                   >
                     OAuth
-                  </Button>
+                  </Button>}
                   <Button
                     type="button"
                     variant={mode === 'authKey' ? 'default' : 'ghost'}
@@ -210,7 +202,6 @@ export function AccountForm() {
                     Auth Key
                   </Button>
                 </div>
-              )}
 
               {!isEditing && mode === 'credentials' && (
                 <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl space-y-3">
