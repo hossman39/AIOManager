@@ -23,7 +23,7 @@ Accounts whose first sync has not started remain inactive; an unpublished group
 cannot receive accounts whose sync has started. Existing assignment version checks
 and retry handling are retained.
 
-Local validation: 331 tests pass; the 129 PostgreSQL contracts run in hosted CI.
+Local validation: 331 tests pass; all 129 PostgreSQL contracts pass in hosted CI.
 Typecheck, lint and build pass. New shared contracts cover atomic publication,
 mixed account states, expiry edits, validation/cancellation failures, rollback,
 concurrent requests, retries, empty configurations, ownership and protection edits.
@@ -41,6 +41,14 @@ in the previous build. The manual timezone check was deferred for lack of time;
 automated timezone contracts remain green. The Android TV notice check is deferred
 until the live server has a reachable HTTPS address. The current loopback notice
 URL is appropriate only for the local PC and was not changed in this increment.
+
+The dedicated local test instance preserves its database and encryption key and
+serves `index-DE-SB2cr.js` on port 1611. An encrypted pre-update SQLite copy is
+retained outside version control. The restarted writer is ready, the expiry scan
+is current, and no pending, running or retrying jobs remained at the local check.
+Code checkpoint `d11cccf` passed all five hosted checks in
+[run 35682902018](https://github.com/hossman39/AIOManager/actions/runs/35682902018):
+Windows/Linux validation, PostgreSQL contracts, and AMD64/ARM64 containers.
 
 ## Earlier selective-expiry checkpoint
 
