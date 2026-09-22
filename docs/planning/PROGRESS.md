@@ -26,8 +26,7 @@ message is â€œYour box has expired. Please reach out to your contact to renew.â€
 Existing customized messages are preserved. Notice setup remains in Sync settings
 and requires an address reachable from the Stremio device.
 
-Local validation: 322 tests pass; 122 PostgreSQL contracts require hosted CI.
-Typecheck, lint and build pass. New shared contracts exercise browsing/subtitle
+Local validation: 322 tests pass. Typecheck, lint and build pass. New shared contracts exercise browsing/subtitle
 retention, disabled preferences, expiry-only publication, personal overrides,
 drift repair, group deletion, renewal, full removal, protected no-write acceptance,
 invalid readback rejection and unreadable-policy fallback.
@@ -40,6 +39,11 @@ The local test instance preserves its database/key, serves `index-DT9XSvYD.js`
 on port 1611, and has an encrypted pre-update SQLite copy outside version control.
 Its notice is still unconfigured; the acceptance steps include enabling it with a
 reachable address. No real provider writes were used for this increment's tests.
+Checkpoint `cdf2425` passed all five hosted checks in
+[run 35674634131](https://github.com/hossman39/AIOManager/actions/runs/35674634131):
+Windows/Linux validation, all 122 PostgreSQL contracts, and AMD64/ARM64 containers.
+The restarted local writer is ready, its expiry scan is current, and no pending,
+running or retrying jobs remained at the final local check.
 
 ## Earlier expiry-notice checkpoint
 
