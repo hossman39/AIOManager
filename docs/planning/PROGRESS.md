@@ -25,8 +25,8 @@ Global sync controls, safe-mode defaults and expiry notice settings now live in
 Settings tabs use router navigation so unfinished managed edits are guarded when
 switching tabs as well as leaving Settings.
 
-Local validation: 346 runnable tests pass; 140 PostgreSQL contracts await hosted
-CI. Typecheck, lint and build pass. Added contracts cover mixed individual/group
+Local validation: 346 runnable tests pass, and all 140 PostgreSQL contracts pass
+in hosted CI. Typecheck, lint and build pass. Added contracts cover mixed individual/group
 bulk changes, invalid selections, rollback, retries, encrypted names, unchanged
 credentials and policy versions, stale caches, and HTTP persistence after restart.
 
@@ -39,6 +39,15 @@ setups. Settings pause/resume, notice persistence, old-route redirection and the
 unsaved-edit navigation guard passed. Account cards, selection controls, the bulk
 dialog and Settings fit a 390px viewport without horizontal overflow. Provider
 traffic in this rehearsal was entirely synthetic.
+
+The dedicated local test instance preserves its database and encryption key and
+serves `index-D7W-ec1z.js` on port 1611. A pre-update database copy retaining
+encrypted records is outside version control. The restarted writer is ready,
+sync is running, and the expiry scan is current. No pending, running or retrying
+jobs remained at the local check.
+Code checkpoint `15cf2c2` passed all five hosted checks in
+[run 35718346453](https://github.com/hossman39/AIOManager/actions/runs/35718346453):
+Windows/Linux validation, PostgreSQL contracts, and AMD64/ARM64 containers.
 
 ## Earlier bulk group-members checkpoint
 
