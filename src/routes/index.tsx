@@ -3,7 +3,6 @@ import { AccountsPage } from '@/pages/AccountsPage'
 import { AccountDetailPage } from '@/pages/AccountDetailPage'
 import { GroupsPage } from '@/pages/GroupsPage'
 import { AccountImportPage } from '@/pages/AccountImportPage'
-import { AccountSyncSettingsPage } from '@/pages/AccountSyncSettingsPage'
 import { SavedAddonsPage } from '@/pages/SavedAddonsPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
@@ -23,7 +22,7 @@ export function AppRoutes() {
       <Route path="/" element={<AccountsPage />} />
       <Route path="/groups" element={<GroupsPage />} />
       <Route path="/accounts/import" element={<AccountImportPage />} />
-      <Route path="/accounts/sync-settings" element={<AccountSyncSettingsPage />} />
+      <Route path="/accounts/sync-settings" element={<Navigate to={`/settings${location.search}#account-sync`} replace />} />
       <Route path="/saved-addons" element={<SavedAddonsPage />} />
       <Route path="/managed" element={<Navigate to={`/${location.search}${location.hash}`} replace />} />
 

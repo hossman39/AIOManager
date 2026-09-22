@@ -709,3 +709,43 @@ test('managed requests follow the existing absolute sync-server root convention'
     assert.equal(requested, `${endpoint}?limit=100`)
   }
 })
+
+test('account editing and bulk client keep exact versions and retry keys without exposing credentials', async () => {
+  const selection = [{ id: publicAccount.id, expectedVersion: publicAccount.version }]
+  const calls: { url: string; body: unknown; key: string | null }[] = []
+  const api = createManagedApi({
+    ...auth,
+    fetch: async (url, options) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(options?.body)),
+        key: new Headers(options?.headers).get('idempotency-key'),
+      })
+      const account = { ...publicAccount, name: 'TV room', password: 'synthetic-hidden' }
+      const result = { account, jobId: null }
+      return reply(
+        String(url).endsWith('/name')
+          ? { ...result, replayed: true }
+          : { accounts: [result], replayed: true }
+      )
+    },
+  })
+  const name = { name: 'TV room', expectedVersion: publicAccount.version }
+  const named = await api.updateAccountName(publicAccount.id, name, 'synthetic-name-retry')
+  await api.updateAccountName(publicAccount.id, name, 'synthetic-name-retry')
+  assert.deepEqual(calls[0], calls[1])
+  assert.ok(calls[0].url.endsWith('/accounts/' + publicAccount.id + '/name'))
+  assert.deepEqual(calls[0].body, name)
+  assert.equal(named.account.name, 'TV room')
+  assert.ok(!JSON.stringify(named).includes('synthetic-hidden'))
+  const membership = {
+    accounts: selection,
+    membership: { mode: 'term' as const, local: '2027-06-01T12:00', timezone: 'Europe/London' },
+  }
+  await api.setAccountsMembership(membership, 'synthetic-bulk-account-membership')
+  assert.ok(calls[2].url.endsWith('/accounts/bulk-membership'))
+  assert.deepEqual(calls[2].body, membership)
+  await api.requestAccountsSync({ accounts: selection }, 'synthetic-bulk-account-sync')
+  assert.ok(calls[3].url.endsWith('/accounts/bulk-sync'))
+  assert.deepEqual(calls[3].body, { accounts: selection })
+})

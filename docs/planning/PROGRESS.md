@@ -6,6 +6,42 @@ been accessed or modified. Branch checkpoints/CI do not authorize production rol
 
 ## Current testing increment
 
+Account cards now have direct editors for display name, group and membership.
+The account list has a **Select** button, selection across filters/pages and
+**Bulk actions** for expiry/lifetime, group assignment, removal from groups and
+sync. Cards are paged at 12 per page, with up to 200 selected accounts. The account
+and group screens share the same update dialog and backend transaction helpers.
+Accounts whose first sync has not started stay staged.
+
+Names are updated in the encrypted server record with account version checks and
+exact retries. The saved Stremio identity, password, setup and policy version stay
+intact, and renaming does not enqueue a provider write. Bulk membership and sync
+work across multiple groups and individual accounts; every selected version and
+owner is checked before any change.
+
+Global sync controls, safe-mode defaults and expiry notice settings now live in
+**Settings → Account sync**. Account links and guidance point there, and old
+`/accounts/sync-settings` bookmarks redirect while preserving the manager query.
+Settings tabs use router navigation so unfinished managed edits are guarded when
+switching tabs as well as leaving Settings.
+
+Local validation: 346 runnable tests pass; 140 PostgreSQL contracts await hosted
+CI. Typecheck, lint and build pass. Added contracts cover mixed individual/group
+bulk changes, invalid selections, rollback, retries, encrypted names, unchanged
+credentials and policy versions, stale caches, and HTTP persistence after restart.
+
+An isolated browser rehearsal used 24 synthetic accounts. It edited a name with
+exact retry after a lost response, changed a dated membership to Asia/Kathmandu,
+moved an account in/out of a group, selected accounts across pages and filters,
+updated mixed account memberships, and synced an active account while skipping a
+staged one. It assigned and detached 21 accounts in bulk while retaining their
+setups. Settings pause/resume, notice persistence, old-route redirection and the
+unsaved-edit navigation guard passed. Account cards, selection controls, the bulk
+dialog and Settings fit a 390px viewport without horizontal overflow. Provider
+traffic in this rehearsal was entirely synthetic.
+
+## Earlier bulk group-members checkpoint
+
 Open groups now separate **Addons**, **Members** and **Sync status** into tabs.
 Members use a compact list with name/email search, status filters and 10 rows per
 page. Checkboxes retain selection across pages and filters; **Select all matching**

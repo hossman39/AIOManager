@@ -11,7 +11,7 @@ import {
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
 import { GroupMemberList } from './GroupMemberList'
 import { GroupMemberDialog } from './GroupMemberDialog'
-import { GroupBulkUpdate } from './GroupBulkUpdate'
+import { ManagedBulkUpdate } from './ManagedBulkUpdate'
 
 type Api = ReturnType<typeof createManagedApi>
 
@@ -261,7 +261,7 @@ export function ManagedGroupMembers({
         </GroupMemberDialog>
       )}
       {bulk && (
-        <GroupBulkUpdate
+        <ManagedBulkUpdate
           api={api}
           group={group}
           accounts={members.filter((account) => selected.has(account.id))}

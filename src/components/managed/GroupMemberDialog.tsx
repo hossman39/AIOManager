@@ -34,7 +34,7 @@ export function GroupMemberDialog({
           <Dialog.Close
             disabled={blocked}
             className="absolute right-4 top-4 rounded p-1 disabled:opacity-50"
-            aria-label="Close member dialog"
+            aria-label="Close dialog"
           >
             <X className="h-4 w-4" />
           </Dialog.Close>

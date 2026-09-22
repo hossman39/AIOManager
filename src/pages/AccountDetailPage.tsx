@@ -159,7 +159,7 @@ function AccountWorkspace({ api, id }: { api: Api; id: string }) {
       {status?.writePaused && (
         <p className="rounded-lg border border-amber-500/30 p-3 text-sm">
           Sync is paused.{' '}
-          <Link to="/accounts/sync-settings" className="underline">
+          <Link to="/settings#account-sync" className="underline">
             Open sync settings
           </Link>
           .

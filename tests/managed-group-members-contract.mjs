@@ -62,6 +62,212 @@ export function managedGroupMembersContract(prefix, options, fixture) {
     test(`${prefix}: ${name}`, options, async (t) => run(await prepareMembers(await fixture(t)), t))
 
   check(
+    'account bulk changes span groups and individual setups without changing assignment',
+    async ({ repository, db, group, selection, publishFixture }) => {
+      const second = (
+        await repository.createGroup(
+          firstAuth,
+          { name: 'Second', addons: group.draft },
+          randomUUID()
+        )
+      ).group
+      await publishFixture(second)
+      await repository.assignGroup(
+        firstAuth,
+        { groupId: second.id, accounts: [selection[1]] },
+        randomUUID()
+      )
+      await repository.assignGroup(
+        firstAuth,
+        { groupId: null, accounts: [selection[2]] },
+        randomUUID()
+      )
+      const accounts = await Promise.all(
+        selection.map(({ id }) => repository.getAccount(firstAuth, id))
+      )
+      const request = {
+        accounts: accounts.map(({ id, version }) => ({ id, expectedVersion: version })),
+        membership: { mode: 'term', local: '2027-01-01T12:00', timezone: 'Asia/Kathmandu' },
+      }
+      const key = randomUUID()
+      const result = await repository.setAccountsMembership(firstAuth, request, key)
+      assert.equal(result.accounts.length, 3)
+      assert.equal(result.accounts.filter(({ jobId }) => jobId).length, 2)
+      for (const { account } of result.accounts) {
+        const previous = accounts.find(({ id }) => id === account.id)
+        assert.equal(account.groupId, previous.groupId)
+        assert.equal(account.state, previous.state)
+        assert.equal(account.expiry.timezone, 'Asia/Kathmandu')
+        assert.equal(account.expiry.at, Date.parse('2027-01-01T06:15:00Z'))
+      }
+      const before = await stored(db)
+      assert.equal(
+        (
+          await repository.setAccountsMembership(
+            firstAuth,
+            { ...request, accounts: [...request.accounts].reverse() },
+            key
+          )
+        ).replayed,
+        true
+      )
+      await assert.rejects(repository.setAccountsMembership(firstAuth, request, randomUUID()), {
+        code: 'VERSION_CONFLICT',
+      })
+      assert.deepEqual(await stored(db), before)
+      const started = result.accounts
+        .filter(({ account }) => account.state === 'active')
+        .map(({ account }) => ({ id: account.id, expectedVersion: account.version }))
+      const syncKey = randomUUID()
+      const synced = await repository.requestAccountsSync(firstAuth, { accounts: started }, syncKey)
+      assert.equal(synced.accounts.length, 2)
+      assert.ok(synced.accounts.every(({ jobId }) => jobId))
+      assert.equal(
+        (await repository.requestAccountsSync(firstAuth, { accounts: started }, syncKey)).replayed,
+        true
+      )
+    }
+  )
+
+  check(
+    'account bulk validation and late failures cannot partially change the selection',
+    async ({ repository, db, selection }) => {
+      const request = { accounts: selection, membership: { mode: 'lifetime' } }
+      const before = await stored(db)
+      await assert.rejects(repository.setAccountsMembership(secondAuth, request, randomUUID()), {
+        code: 'NOT_FOUND',
+      })
+      for (const accounts of [
+        [],
+        [selection[0], selection[0]],
+        Array.from({ length: 201 }, () => ({ id: randomUUID(), expectedVersion: 1 })),
+      ]) {
+        await assert.rejects(
+          repository.setAccountsMembership(firstAuth, { ...request, accounts }, randomUUID()),
+          { code: 'INVALID_INPUT' }
+        )
+      }
+      await assert.rejects(
+        repository.requestAccountsSync(firstAuth, { accounts: selection }, randomUUID()),
+        { code: 'INVALID_STATE' }
+      )
+      assert.deepEqual(await stored(db), before)
+      const statement = db.statement.bind(db)
+      db.statement = (connection, method, sql, params) => {
+        if (
+          sql.startsWith('INSERT INTO managed_idempotency') &&
+          params[1] === 'accounts.bulk-membership'
+        )
+          throw Error('Synthetic account bulk failure')
+        return statement(connection, method, sql, params)
+      }
+      try {
+        await assert.rejects(
+          repository.setAccountsMembership(firstAuth, request, randomUUID()),
+          /Synthetic account bulk failure/
+        )
+      } finally {
+        db.statement = statement
+      }
+      assert.deepEqual(await stored(db), before)
+    }
+  )
+
+  check(
+    'renaming an account preserves its login, policy, setup, and queued work across retries',
+    async ({ repository, db, crypto, members }) => {
+      const account = members[0]
+      const row = await db.get('SELECT * FROM managed_accounts WHERE id = $1', [account.id])
+      const context = { owner: firstAuth.owner, id: account.id, purpose: 'credentials' }
+      const credentials = crypto.open(row.credentials_enc, context)
+      const key = randomUUID(),
+        request = { name: '  Living room  ', expectedVersion: account.version }
+      const result = await repository.updateAccountName(firstAuth, account.id, request, key)
+      assert.equal(result.account.name, 'Living room')
+      assert.equal(result.account.email, account.email)
+      assert.equal(result.account.version, account.version + 1)
+      assert.equal(result.account.policyVersion, account.policyVersion)
+      assert.equal(result.jobId, null)
+      const updated = await db.get('SELECT * FROM managed_accounts WHERE id = $1', [account.id])
+      assert.deepEqual(crypto.open(updated.credentials_enc, context), {
+        ...credentials,
+        name: 'Living room',
+      })
+      for (const field of ['personal_enc', 'configuration_enc', 'group_id', 'provider_enc'])
+        assert.equal(updated[field], row[field])
+      assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+      assert.ok(!updated.credentials_enc.includes('Living room'))
+      assert.ok(!JSON.stringify(result).includes(credentials.password))
+      const before = await stored(db)
+      assert.equal(
+        (await repository.updateAccountName(firstAuth, account.id, request, key)).replayed,
+        true
+      )
+      await assert.rejects(
+        repository.updateAccountName(
+          firstAuth,
+          account.id,
+          { ...request, name: 'Changed retry' },
+          key
+        ),
+        { code: 'IDEMPOTENCY_CONFLICT' }
+      )
+      await assert.rejects(
+        repository.updateAccountName(firstAuth, account.id, request, randomUUID()),
+        { code: 'VERSION_CONFLICT' }
+      )
+      await assert.rejects(
+        repository.updateAccountName(secondAuth, account.id, request, randomUUID()),
+        { code: 'NOT_FOUND' }
+      )
+      assert.deepEqual(await stored(db), before)
+      const linked = await repository.connectAccounts(firstAuth, {
+        accounts: [{ localId: randomUUID(), email: account.email, name: 'Stale cached name' }],
+      })
+      assert.equal(linked.connections[0].account.name, 'Living room')
+    }
+  )
+
+  check(
+    'invalid names and offboarding accounts cannot be edited',
+    async ({ repository, db, members, selection }) => {
+      const account = members[0],
+        before = await stored(db)
+      for (const name of ['', '   ', 'x'.repeat(121), 1, null])
+        await assert.rejects(
+          repository.updateAccountName(
+            firstAuth,
+            account.id,
+            { name, expectedVersion: account.version },
+            randomUUID()
+          ),
+          { code: 'INVALID_INPUT' }
+        )
+      assert.deepEqual(await stored(db), before)
+      await db.run("UPDATE managed_accounts SET state = 'offboarding' WHERE id = $1", [account.id])
+      const offboarding = await stored(db)
+      await assert.rejects(
+        repository.updateAccountName(
+          firstAuth,
+          account.id,
+          { name: 'New name', expectedVersion: account.version },
+          randomUUID()
+        ),
+        { code: 'INVALID_STATE' }
+      )
+      await assert.rejects(
+        repository.setAccountsMembership(
+          firstAuth,
+          { accounts: selection, membership: { mode: 'lifetime' } },
+          randomUUID()
+        ),
+        { code: 'INVALID_STATE' }
+      )
+      assert.deepEqual(await stored(db), offboarding)
+    }
+  )
+
+  check(
     'bulk membership preserves the chosen timezone and only queues started accounts',
     async ({ repository, db, group, selection, members }) => {
       const before = await db.query(

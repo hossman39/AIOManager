@@ -236,6 +236,28 @@ export async function registerManagedRoutes(app, repository, manifestService) {
           request.headers['idempotency-key']
         )
       )
+      routes.post('/accounts/bulk-membership', { bodyLimit: 32 * 1024 }, (request) =>
+        repository.setAccountsMembership(
+          request.managedAuth,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/accounts/bulk-sync', { bodyLimit: 32 * 1024 }, (request) =>
+        repository.requestAccountsSync(
+          request.managedAuth,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/accounts/:id/name', { bodyLimit: 4096 }, (request) =>
+        repository.updateAccountName(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
       routes.get('/accounts/:id/personal-addons', (request) =>
         repository.getPersonalAddons(request.managedAuth, request.params.id)
       )

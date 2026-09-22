@@ -40,6 +40,14 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    Stremio test login, then **Open account**. An imported server-only account opens
    the same detail screen. The account list contains summaries, search and filters;
    groups and sync settings have their own screens.
+   Use the pencil beside a name, group or membership to edit it directly on the
+   account card. Saving refreshes the card. **Select** reveals checkboxes and
+   **Bulk actions** for expiry/lifetime, group assignment, removal from groups and
+   sync. Selection carries across filters and pages (12 accounts per page), with
+   up to 200 selected at once. Group removal keeps the accounts and their setups;
+   bulk sync skips accounts whose first sync has not started.
+   Global sync controls and the Stremio expiry notice are under **Settings →
+   Account sync**. Old `/accounts/sync-settings` bookmarks redirect there.
 2. Leave **Group** set to **No group — individual setup**. On **Addons**, confirm
    the installed addon cards appear. Try Configure, Customize, Catalogs, Reorder,
    enable/disable, Library and Install addon. Changes form a draft until **Save
@@ -53,7 +61,7 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    repeated times require an explicit occurrence. Lifetime is a separate choice.
 4. Open **Sync & access**, choose **Preview first sync**, review the addon list,
    confirm it and choose **Start sync**. No group is required. If paused, open
-   **Accounts → ⋯ → Sync settings** and resume sync. Wait for **verified** in
+   **Settings → Account sync** and resume sync. Wait for **verified** in
    **Sync & access**. On **Addons**, use **Check Stremio** to see the actual installed
    list and the email being checked. Then check the same Stremio login on Android, including
    order, names, catalogs and protected/default entries.
@@ -73,13 +81,13 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    Accounts moved
    from another group use the new group's shared addons and keep account-only
    addons. Accounts whose sync has not started remain inactive. You can also use
-   the account's **Group** tab or **Assign group** on Accounts.
+   the account's **Group** tab or **Select → Bulk actions → Assign group** on Accounts.
    Open one member and customize an addon: the other members and the
    shared group must remain unchanged. Publish another group change; untouched
    addons follow it while that account's customizations remain. **Use group
    version** resets an individual addon override. Leave the group and confirm the
    complete saved setup is retained for independent management. Pause and resume
-   from Sync settings to check that changes wait while paused.
+   from **Settings → Account sync** to check that changes wait while paused.
    Open a disposable group and choose **Delete group**. Confirm the dialog; the
    group should disappear and its members should remain as individual accounts,
    with their complete addon setups, customizations and memberships preserved.
@@ -102,7 +110,7 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    Expired accounts are rechecked about every five minutes, subject to backlog
    and provider availability. Ordinary active client edits are not periodically
    replaced.
-   To show an expiry card, open **Accounts → ⋯ → Sync settings → Expiry notice in
+   To show an expiry card, open **Settings → Account sync → Expiry notice in
    Stremio**, enable it, and save the address of this AIOManager installation,
    a message, and an optional renewal/contact URL. Existing expired accounts are
    queued for this change. Check that the unchecked browsing addons and

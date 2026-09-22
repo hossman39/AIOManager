@@ -662,6 +662,32 @@ export function createManagedApi({
       key: string,
       signal?: AbortSignal
     ) => request('/accounts/assign-group', assignmentResultSchema, { body, key, signal }),
+    updateAccountName: (
+      id: string,
+      body: { name: string; expectedVersion: number },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/accounts/${encodeURIComponent(id)}/name`, membershipResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    setAccountsMembership: (
+      body: { accounts: GroupMemberSelection; membership: BulkMembership },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request('/accounts/bulk-membership', assignmentResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    requestAccountsSync: (
+      body: { accounts: GroupMemberSelection },
+      key: string,
+      signal?: AbortSignal
+    ) => request('/accounts/bulk-sync', assignmentResultSchema, { body, key, signal }),
     setGroupMembership: (
       id: string,
       body: { accounts: GroupMemberSelection; membership: BulkMembership },

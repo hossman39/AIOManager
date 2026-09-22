@@ -113,6 +113,9 @@ test('every managed API requires server-verified owner credentials', async (t) =
       { method: 'GET', url: `/api/managed/deployments/${randomUUID()}` },
       { method: 'GET', url: `/api/managed/groups/${randomUUID()}/deployment` },
       { method: 'POST', url: '/api/managed/accounts/assign-group', payload: {} },
+      { method: 'POST', url: '/api/managed/accounts/bulk-membership', payload: {} },
+      { method: 'POST', url: '/api/managed/accounts/bulk-sync', payload: {} },
+      { method: 'POST', url: `/api/managed/accounts/${randomUUID()}/name`, payload: {} },
       { method: 'GET', url: `/api/managed/accounts/${randomUUID()}/personal-addons` },
       {
         method: 'POST',
@@ -874,3 +877,46 @@ test(
     await cancelled.promise
   }
 )
+
+test('account editing and bulk HTTP routes preserve saved identity and remain passive before first sync', async (t) => {
+  const { app, db, networkCalls, start } = await fixture(t, {}, { MANAGED_WRITES_ENABLED: 'true' })
+  const imported = await app.inject(importRequest())
+  const id = imported.json().accounts[0].id
+  const request = managedPost('/accounts/' + id + '/name', { name: 'TV room', expectedVersion: 1 })
+  const renamed = await app.inject(request)
+  assert.equal(renamed.statusCode, 200, renamed.body)
+  assert.equal(renamed.json().account.name, 'TV room')
+  assert.equal(renamed.json().account.email, syntheticAccount.email)
+  assert.equal((await app.inject(request)).json().replayed, true)
+  assert.ok(!renamed.body.includes(syntheticAccount.password))
+  const membership = await app.inject(
+    managedPost('/accounts/bulk-membership', {
+      accounts: [{ id, expectedVersion: 2 }],
+      membership: { mode: 'term', local: '2027-06-01T12:00', timezone: 'Europe/London' },
+    })
+  )
+  assert.equal(membership.statusCode, 200, membership.body)
+  assert.equal(membership.json().accounts[0].account.expiry.timezone, 'Europe/London')
+  const syncRequest = managedPost('/accounts/bulk-sync', { accounts: [{ id, expectedVersion: 3 }] })
+  const inactive = await app.inject(syncRequest)
+  assert.equal(inactive.statusCode, 409, inactive.body)
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 0)
+  await db.run(
+    "UPDATE managed_accounts SET state = 'active', provider_key = 'synthetic-account-http', provider_enc = 'synthetic' WHERE id = $1",
+    [id]
+  )
+  const queued = await app.inject(syncRequest)
+  assert.equal(queued.statusCode, 200, queued.body)
+  assert.equal(queued.json().accounts.length, 1)
+  assert.equal((await app.inject(syncRequest)).json().replayed, true)
+  assert.equal(networkCalls(), 0)
+  await app.close()
+  const restarted = await start()
+  const saved = await restarted.app.inject({
+    method: 'GET',
+    url: '/api/managed/accounts/' + id,
+    headers: headers(),
+  })
+  assert.equal(saved.json().name, 'TV room')
+  assert.equal(saved.json().expiry.timezone, 'Europe/London')
+})

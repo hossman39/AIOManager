@@ -26,27 +26,36 @@ type Result = Awaited<ReturnType<Api['assignGroup']>> & { kind: Action['kind']; 
 const field = 'w-full min-w-0 rounded-md border bg-background px-3 py-2 text-sm'
 const countLabel = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
-export function GroupBulkUpdate({
+export function ManagedBulkUpdate({
   api,
   group,
   accounts,
   onClose,
   onSaved,
   onReload,
+  edit,
 }: {
   api: Api
-  group: ManagedGroup
+  group?: ManagedGroup
   accounts: ManagedAccount[]
   onClose: () => void
   onSaved: (notice: string) => void
   onReload: () => void
+  edit?: 'membership' | 'move'
 }) {
-  const [kind, setKind] = useState<Action['kind']>('membership')
-  const [mode, setMode] = useState<'term' | 'lifetime'>('term')
-  const [local, setLocal] = useState('')
-  const [timezone, setTimezone] = useState<string>(MEMBERSHIP_TIMEZONE)
-  const [offset, setOffset] = useState<number | undefined>()
-  const [destination, setDestination] = useState('')
+  const original = edit ? accounts[0] : undefined
+  const [kind, setKind] = useState<Action['kind']>(edit ?? 'membership')
+  const [mode, setMode] = useState<'term' | 'lifetime'>(
+    original?.membershipType === 'lifetime' ? 'lifetime' : 'term'
+  )
+  const [local, setLocal] = useState(original?.expiry?.local ?? '')
+  const [timezone, setTimezone] = useState<string>(
+    original?.expiry?.timezone ?? MEMBERSHIP_TIMEZONE
+  )
+  const [offset, setOffset] = useState<number | undefined>(original?.expiry?.offset)
+  const [destination, setDestination] = useState(
+    edit === 'move' ? (original?.groupId ?? 'individual') : ''
+  )
   const [groups, setGroups] = useState<ManagedGroupSummary[]>([])
   const [loadingGroups, setLoadingGroups] = useState(false)
   const [groupError, setGroupError] = useState('')
@@ -76,7 +85,7 @@ export function GroupBulkUpdate({
           after = page.nextCursor ?? ''
         } while (after && !controller.signal.aborted)
         if (!controller.signal.aborted)
-          setGroups(available.filter((item) => item.id !== group.id && !item.archived))
+          setGroups(available.filter((item) => item.id !== group?.id && !item.archived))
       } catch (error) {
         if (!controller.signal.aborted)
           setGroupError(error instanceof ManagedApiError ? error.message : 'Could not load groups.')
@@ -85,22 +94,30 @@ export function GroupBulkUpdate({
       }
     })()
     return () => controller.abort()
-  }, [api, group.id, kind, groupRead])
+  }, [api, group?.id, kind, groupRead])
   const mutation = useManagedSubmission<Action, Result>(
     async (value, key, signal) => {
       const result =
         value.kind === 'membership'
-          ? await api.setGroupMembership(
-              group.id,
-              { accounts: value.accounts, membership: value.membership },
-              key,
-              signal
-            )
+          ? group
+            ? await api.setGroupMembership(
+                group.id,
+                { accounts: value.accounts, membership: value.membership },
+                key,
+                signal
+              )
+            : await api.setAccountsMembership(
+                { accounts: value.accounts, membership: value.membership },
+                key,
+                signal
+              )
           : value.kind === 'sync'
-            ? await api.requestGroupSync(group.id, { accounts: value.accounts }, key, signal)
+            ? group
+              ? await api.requestGroupSync(group.id, { accounts: value.accounts }, key, signal)
+              : await api.requestAccountsSync({ accounts: value.accounts }, key, signal)
             : await api.assignGroup(
                 {
-                  sourceGroupId: group.id,
+                  ...(group ? { sourceGroupId: group.id } : {}),
                   groupId: value.kind === 'move' ? value.groupId : null,
                   useGroupAddons: true,
                   accounts: value.accounts,
@@ -112,7 +129,7 @@ export function GroupBulkUpdate({
     },
     (result) => {
       const count = result.accounts.length
-      const target = countLabel(count, 'member')
+      const target = countLabel(count, group ? 'member' : 'account')
       onSaved(
         result.kind === 'membership'
           ? `Membership updated for ${target}.`
@@ -134,7 +151,9 @@ export function GroupBulkUpdate({
     kind === 'membership'
       ? mode === 'lifetime' || resolved.ok
       : kind === 'move'
-        ? Boolean(eligibleDestination) && !loadingGroups && !groupError
+        ? (Boolean(eligibleDestination) || (Boolean(edit) && destination === 'individual')) &&
+          !loadingGroups &&
+          !groupError
         : kind === 'sync'
           ? active.length > 0
           : true
@@ -155,13 +174,27 @@ export function GroupBulkUpdate({
             : { mode, local, timezone, offset: resolved.ok ? resolved.expiry.offset : undefined },
       })
     } else if (kind === 'move')
-      void mutation.submit({ kind, accounts: selection, groupId: destination })
+      if (edit && destination === 'individual')
+        void mutation.submit({ kind: 'remove', accounts: selection })
+      else void mutation.submit({ kind, accounts: selection, groupId: destination })
     else void mutation.submit({ kind, accounts: selection })
   }
   return (
     <GroupMemberDialog
-      title="Bulk update members"
-      description={`${accounts.length} selected in ${group.name}. Choose the change to apply to this selection.`}
+      title={
+        edit
+          ? edit === 'membership'
+            ? 'Edit membership'
+            : 'Edit group'
+          : group
+            ? 'Bulk update members'
+            : 'Bulk update accounts'
+      }
+      description={
+        edit
+          ? original!.name || original!.email
+          : `${accounts.length} selected${group ? ` in ${group.name}` : ''}. Choose the change to apply to this selection.`
+      }
       blocked={blocked}
       onClose={onClose}
     >
@@ -173,20 +206,24 @@ export function GroupBulkUpdate({
         }}
       >
         <fieldset disabled={locked} className="space-y-4">
-          <label className="block space-y-1 text-sm" htmlFor="member-bulk-action">
-            <span>Update</span>
-            <select
-              id="member-bulk-action"
-              className={field}
-              value={kind}
-              onChange={(event) => setKind(event.target.value as Action['kind'])}
-            >
-              <option value="membership">Membership / expiry</option>
-              <option value="move">Move to another group</option>
-              <option value="remove">Remove from this group</option>
-              <option value="sync">Sync addons now</option>
-            </select>
-          </label>
+          {!edit && (
+            <label className="block space-y-1 text-sm" htmlFor="member-bulk-action">
+              <span>Update</span>
+              <select
+                id="member-bulk-action"
+                className={field}
+                value={kind}
+                onChange={(event) => setKind(event.target.value as Action['kind'])}
+              >
+                <option value="membership">Membership / expiry</option>
+                <option value="move">{group ? 'Move to another group' : 'Assign group'}</option>
+                <option value="remove">
+                  {group ? 'Remove from this group' : 'Remove from groups'}
+                </option>
+                <option value="sync">Sync addons now</option>
+              </select>
+            </label>
+          )}
           {kind === 'membership' && (
             <>
               <label className="block space-y-1 text-sm" htmlFor="member-bulk-mode">
@@ -240,7 +277,9 @@ export function GroupBulkUpdate({
                     />
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    All selected members get this cutoff in the chosen timezone.
+                    {edit
+                      ? 'Uses the chosen timezone.'
+                      : 'All selected accounts get this cutoff in the chosen timezone.'}
                   </p>
                   {local && !choices.ok && (
                     <p role="alert" className="text-sm text-destructive">
@@ -276,8 +315,8 @@ export function GroupBulkUpdate({
                   )}
                   {resolved.ok && resolved.expiry.at <= Date.now() && (
                     <p role="status" className="text-sm text-amber-500">
-                      This date has passed. These members will use the group's expiry setup when
-                      sync runs.
+                      This date has passed. These accounts will use their expiry setup when sync
+                      runs.
                     </p>
                   )}
                 </>
@@ -301,6 +340,7 @@ export function GroupBulkUpdate({
                   onChange={(event) => setDestination(event.target.value)}
                 >
                   <option value="">{loadingGroups ? 'Loading groups…' : 'Choose a group'}</option>
+                  {edit && <option value="individual">No group — individual setup</option>}
                   {groups.map((item) => (
                     <option
                       key={item.id}
@@ -314,7 +354,9 @@ export function GroupBulkUpdate({
                 </select>
               </label>
               <p className="text-sm text-muted-foreground">
-                The new group supplies shared addon settings. Account-only addons stay.
+                {destination === 'individual'
+                  ? 'The complete addon setup and customizations stay with this account.'
+                  : 'The new group supplies shared addon settings. Account-only addons stay.'}
               </p>
               {groupError && (
                 <>
@@ -334,7 +376,7 @@ export function GroupBulkUpdate({
           )}
           {kind === 'remove' && (
             <p className="text-sm">
-              These members become individual accounts. Their addon setups, customizations and
+              These accounts become individually managed. Their addon setups, customizations and
               memberships are kept.
             </p>
           )}
@@ -366,7 +408,7 @@ export function GroupBulkUpdate({
           </Button>
           {mutation.stale && (
             <Button type="button" variant="outline" onClick={onReload}>
-              Reload members
+              Reload accounts
             </Button>
           )}
           {mutation.uncertain ? (
@@ -377,13 +419,17 @@ export function GroupBulkUpdate({
             <Button type="submit" disabled={locked || !valid}>
               {mutation.busy
                 ? 'Applying…'
-                : kind === 'sync'
-                  ? `Sync ${countLabel(active.length, 'account')}`
-                  : kind === 'remove'
-                    ? `Remove ${accounts.length} from group`
-                    : kind === 'move'
-                      ? `Move ${countLabel(accounts.length, 'member')}`
-                      : `Update ${countLabel(accounts.length, 'member')}`}
+                : edit
+                  ? edit === 'membership'
+                    ? 'Save membership'
+                    : 'Save group'
+                  : kind === 'sync'
+                    ? `Sync ${countLabel(active.length, 'account')}`
+                    : kind === 'remove'
+                      ? `Remove ${accounts.length} from group`
+                      : kind === 'move'
+                        ? `Move ${countLabel(accounts.length, group ? 'member' : 'account')}`
+                        : `Update ${countLabel(accounts.length, group ? 'member' : 'account')}`}
             </Button>
           )}
         </div>

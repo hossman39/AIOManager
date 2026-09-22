@@ -206,7 +206,7 @@ export function ManagedAddonCards({
             {groupAddons
               ? 'Group addon choices are managed in Groups. You can choose separately for account-only addons.'
               : 'The shortcut keeps catalog, metadata, and subtitle addons that do not provide streams. Review the checkboxes before saving.'}{' '}
-            Enable the renewal message in Sync settings → Expiry notice in Stremio.
+            Enable the renewal message in Settings → Account sync → Expiry notice in Stremio.
           </p>
         </div>
       )}

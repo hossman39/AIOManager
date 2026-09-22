@@ -11,7 +11,7 @@ import { createManagedGroupRepository } from './groups.js'
 import { createManagedOperations } from './operations.js'
 import { createManagedConnections } from './connections.js'
 import { createAccountAddonRepository } from './account-addons.js'
-import { lockGroupMembers, memberSelectionSchema } from './group-members.js'
+import { lockAccountSelection, lockGroupMembers, memberSelectionSchema } from './group-members.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
@@ -164,6 +164,52 @@ export function createManagedRepository({
     return { account: publicAccount(updated), jobId, replayed: false }
   }
 
+  async function setAccountsMembership(auth, input, key, groupId) {
+    const parsed = bulkMembershipSchema.safeParse(input)
+    if (!parsed.success) throw new ManagedError('INVALID_INPUT')
+    const value = parsed.data
+    value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    let expiry = null
+    if (value.membership.mode === 'term') {
+      const resolved = resolveExpiry(
+        value.membership.local,
+        value.membership.offset,
+        value.membership.timezone
+      )
+      if (!resolved.ok) throw new ManagedError(resolved.code)
+      expiry = resolved.expiry
+    }
+    return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
+      idempotent(
+        tx,
+        owner,
+        groupId === undefined ? 'accounts.bulk-membership' : 'groups.membership',
+        key,
+        { ...(groupId === undefined ? {} : { groupId }), ...value },
+        timestamp,
+        async () => {
+          if (groupId === undefined) await lockAccountSelection(tx, owner, value.accounts)
+          else await lockGroupMembers(tx, owner, groupId, value.accounts)
+          const accounts = []
+          for (const expected of value.accounts) {
+            const result = await setMembershipInTransaction(
+              tx,
+              owner,
+              {
+                ...expected,
+                mode: value.membership.mode,
+                expiry,
+              },
+              timestamp
+            )
+            accounts.push({ account: result.account, jobId: result.jobId })
+          }
+          return { accounts, replayed: false }
+        }
+      )
+    )
+  }
+
   async function inspectCandidates(connection, owner, parsed) {
     const candidates = []
     for (const candidate of parsed.accounts) {
@@ -275,50 +321,58 @@ export function createManagedRepository({
       validateManifests,
     }),
     authorize,
-    async setGroupMembership(auth, groupId, input, key) {
-      const parsed = bulkMembershipSchema.safeParse(input)
+    async updateAccountName(auth, id, input, key) {
+      const parsed = z
+        .strictObject({
+          name: z.string().trim().min(1).max(120),
+          expectedVersion: z.number().int().positive(),
+        })
+        .safeParse(input)
       if (!parsed.success) throw new ManagedError('INVALID_INPUT')
       const value = parsed.data
-      value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      let expiry = null
-      if (value.membership.mode === 'term') {
-        const resolved = resolveExpiry(
-          value.membership.local,
-          value.membership.offset,
-          value.membership.timezone
-        )
-        if (!resolved.ok) throw new ManagedError(resolved.code)
-        expiry = resolved.expiry
-      }
       return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
-        idempotent(
-          tx,
-          owner,
-          'groups.membership',
-          key,
-          { groupId, ...value },
-          timestamp,
-          async () => {
-            await lockGroupMembers(tx, owner, groupId, value.accounts)
-            const accounts = []
-            for (const expected of value.accounts) {
-              const result = await setMembershipInTransaction(
-                tx,
+        idempotent(tx, owner, 'accounts.name', key, { id, ...value }, timestamp, async () => {
+          const [row] = await lockAccountSelection(tx, owner, [
+            { id, expectedVersion: value.expectedVersion },
+          ])
+          const credentials = crypto.open(row.credentials_enc, context(owner, id, 'credentials'))
+          if (credentials.name !== value.name) {
+            await tx.run(
+              'UPDATE managed_accounts SET credentials_enc = $1, record_version = record_version + 1, updated_at = $2 WHERE owner_id = $3 AND id = $4',
+              [
+                crypto.seal(
+                  { ...credentials, name: value.name },
+                  context(owner, id, 'credentials')
+                ),
+                timestamp,
                 owner,
-                {
-                  ...expected,
-                  mode: value.membership.mode,
-                  expiry,
-                },
-                timestamp
-              )
-              accounts.push({ account: result.account, jobId: result.jobId })
-            }
-            return { accounts, replayed: false }
+                id,
+              ]
+            )
+            const eventId = randomUUID()
+            await tx.run(
+              'INSERT INTO managed_audit (id, owner_id, event_type, subject_id, detail_enc, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+              [
+                eventId,
+                owner,
+                'account.renamed',
+                id,
+                crypto.seal({ name: value.name }, context(owner, eventId, 'audit')),
+                timestamp,
+              ]
+            )
           }
-        )
+          const updated = await tx.get(
+            'SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2',
+            [owner, id]
+          )
+          return { account: publicAccount(updated), jobId: null, replayed: false }
+        })
       )
     },
+    setAccountsMembership,
+    setGroupMembership: (auth, groupId, input, key) =>
+      setAccountsMembership(auth, input, key, groupId),
     async setMembership(auth, id, input, requestKey) {
       const parsed = membershipSchema.safeParse(input)
       if (!parsed.success) throw new ManagedError('INVALID_INPUT')

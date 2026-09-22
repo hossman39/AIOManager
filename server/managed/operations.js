@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { lockGroupMembers, memberSelectionSchema } from './group-members.js'
+import { lockAccountSelection, lockGroupMembers, memberSelectionSchema } from './group-members.js'
 import { z } from 'zod'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
@@ -133,6 +133,43 @@ export function createManagedOperations({
       timestamp
     )
     return { account: publicAccount(updated), jobId: job.id, replayed: false }
+  }
+
+  async function requestAccountsSync(auth, input, key, groupId) {
+    requireRuntime()
+    const value = parse(z.strictObject({ accounts: memberSelectionSchema }), input)
+    value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
+      idempotent(
+        tx,
+        owner,
+        groupId === undefined ? 'accounts.bulk-sync' : 'groups.member-sync',
+        key,
+        { ...(groupId === undefined ? {} : { groupId }), ...value },
+        timestamp,
+        async () => {
+          const members =
+            groupId === undefined
+              ? await lockAccountSelection(tx, owner, value.accounts)
+              : await lockGroupMembers(tx, owner, groupId, value.accounts)
+          if (members.some((account) => account.state !== 'active'))
+            throw new ManagedError('INVALID_STATE')
+          const accounts = []
+          for (const expected of value.accounts) {
+            const result = await requestSyncInTransaction(
+              tx,
+              owner,
+              expected.id,
+              expected,
+              false,
+              timestamp
+            )
+            accounts.push({ account: result.account, jobId: result.jobId })
+          }
+          return { accounts, replayed: false }
+        }
+      )
+    )
   }
 
   const operations = {
@@ -360,39 +397,8 @@ export function createManagedOperations({
         )
       )
     },
-    async requestGroupSync(auth, groupId, input, key) {
-      requireRuntime()
-      const value = parse(z.strictObject({ accounts: memberSelectionSchema }), input)
-      value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
-        idempotent(
-          tx,
-          owner,
-          'groups.member-sync',
-          key,
-          { groupId, ...value },
-          timestamp,
-          async () => {
-            const members = await lockGroupMembers(tx, owner, groupId, value.accounts)
-            if (members.some((account) => account.state !== 'active'))
-              throw new ManagedError('INVALID_STATE')
-            const accounts = []
-            for (const expected of value.accounts) {
-              const result = await requestSyncInTransaction(
-                tx,
-                owner,
-                expected.id,
-                expected,
-                false,
-                timestamp
-              )
-              accounts.push({ account: result.account, jobId: result.jobId })
-            }
-            return { accounts, replayed: false }
-          }
-        )
-      )
-    },
+    requestAccountsSync,
+    requestGroupSync: (auth, groupId, input, key) => requestAccountsSync(auth, input, key, groupId),
     async accountExecution(auth, id) {
       const owner = await authorize(auth)
       const row = await db.get('SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2', [
