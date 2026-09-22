@@ -16,9 +16,7 @@
     "managed:test": "node scripts/managed-test-server.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "preview": "vite preview",
-    "prepare": "husky || true",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "prepare": "husky || true"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -84,7 +82,6 @@
     "concurrently": "^9.2.1",
     "eslint": "^8.57.1",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "gh-pages": "^6.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "postcss": "^8.5.6",

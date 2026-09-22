@@ -70,6 +70,9 @@ CLAUDE.local.md
 server/data/
 aio.db
 data/
+aio-data/
+aio-db-data/
+backups/
 *.db
 *.db-shm
 *.db-wal

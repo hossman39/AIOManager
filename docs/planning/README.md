@@ -1,6 +1,11 @@
 # Managed AIOManager fork: planning package
 
-Prepared 2026-09-19. Status: primary V1 decisions recorded; first local compatibility/migration/suspension foundation tested; no production deployment. See [implementation progress](PROGRESS.md) for exact coverage and remaining work.
+This directory preserves the design decisions and historical implementation
+checkpoints. Version 2.0.0 is implemented, verified and published. Start with
+[implementation progress](PROGRESS.md) for current evidence and
+[the deployment guide](../../DEPLOY.md) for launch. Android TV acceptance is planned
+for the live environment; API client integration and whole-server backups are deferred.
+The earlier milestone descriptions below are historical, not outstanding work lists.
 
 The priority is reliable management of existing paying clients. V1 covers migration from AIOManager, automatic group addon management, and per-account expiry and renewal. V2 covers expanded viewing metrics and personal recommendation catalogs.
 
@@ -14,7 +19,7 @@ Owner clarification: migrate email and password only, using email as the display
 4. [Verification and release gates](VERIFICATION.md): failure scenarios, performance targets, and evidence required before rollout.
 5. [V2 roadmap](V2-ROADMAP.md): metrics inventory, data limitations, and private recommendation catalogs.
 
-## Repository state
+## Original repository baseline (2026-09-19)
 
 - Existing GitHub fork: [hossman39/AIOManager](https://github.com/hossman39/AIOManager). It already existed and matched upstream when inspected.
 - Base: AIOManager 1.8.5, build 2, commit `dfbbc3412c1928554670d27457fd4983de59dbe8`.
