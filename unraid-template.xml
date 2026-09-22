@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2.0">
   <Name>AIOManager</Name>
-  <Repository>ghcr.io/hossman39/aiomanager:2.0.0</Repository>
+  <Repository>ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c</Repository>
   <Registry>https://github.com/hossman39/AIOManager/pkgs/container/aiomanager</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -50,7 +50,7 @@
       <Mode/>
     </Variable>
     <Variable>
-      <Value>true</Value>
+      <Value>false</Value>
       <Name>LOG_PRETTY_PRINT</Name>
       <Mode/>
     </Variable>
@@ -59,11 +59,23 @@
       <Name>NODE_ENV</Name>
       <Mode/>
     </Variable>
+    <Variable>
+      <Value>false</Value>
+      <Name>MANAGED_WRITES_ENABLED</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value>true</Value>
+      <Name>MANAGED_BACKUPS_ENABLED</Name>
+      <Mode/>
+    </Variable>
   </Environment>
   <Labels/>
   <Config Name="Web Port" Target="1610" Default="1610" Mode="tcp" Description="The host port AIOManager listens on." Type="Port" Display="always" Required="true" Mask="false">1610</Config>
   <Config Name="App Data" Target="/app/data" Default="/mnt/user/appdata/aiomanager" Mode="rw" Description="Persistent storage for the AIO database and configuration." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/aiomanager</Config>
   <Config Name="Log Level" Target="LOG_LEVEL" Default="info" Mode="" Description="Verbosity of server logs (fatal, error, warn, info, debug, trace)." Type="Variable" Display="always" Required="false" Mask="false">info</Config>
-  <Config Name="Log Pretty Print" Target="LOG_PRETTY_PRINT" Default="true" Mode="" Description="Enable colorful AIOStreams-style logs (set to false for JSON)." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="Log Pretty Print" Target="LOG_PRETTY_PRINT" Default="false" Mode="" Description="Enable colorful logs (false uses production JSON logs)." Type="Variable" Display="always" Required="false" Mask="false">false</Config>
   <Config Name="Environment" Target="NODE_ENV" Default="production" Mode="" Description="Run mode (production or development)." Type="Variable" Display="advanced" Required="false" Mask="false">production</Config>
+  <Config Name="Managed sync" Target="MANAGED_WRITES_ENABLED" Default="false" Mode="" Description="Set true in the intended instance, then resume from Settings / Account sync. Run one writer per database." Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="Application backups" Target="MANAGED_BACKUPS_ENABLED" Default="true" Mode="" Description="Keep daily encrypted application archives in /app/data/backups." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
 </Container>

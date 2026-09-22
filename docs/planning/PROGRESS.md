@@ -5,6 +5,29 @@ with Android TV acceptance in the live environment and whole-server backups defe
 No paying accounts or production database have been modified during this increment.
 The deployment target/access is still needed; publishing an image is not a VPS deployment.
 
+## Launch handoff cleanup
+
+The owner deferred API access/Box Manager integration and requested project cleanup
+and live readiness. No API key setup is a launch requirement. The implemented API
+remains optional; this cleanup changes deployment files and documentation, not
+application behavior or the database schema.
+
+The environment example and Unraid template pin the verified 2.0.0 image digest.
+The default Compose file runs only the app, with a loopback host binding and a
+60-second shutdown grace period. A separate PostgreSQL overlay retains the original
+database service names and bind mounts and requires the actual database password.
+Existing stacks keep their data, engine, keys and proxy networks during upgrade.
+The obsolete static Nginx file and GitHub Pages deployment command/dependency were
+removed; all remaining dependency versions and production dependencies are unchanged.
+Local data, backup archives and rehearsal caches are excluded from source/build
+contexts. Historical planning and contributor guides now point to current release
+evidence and the concrete launch instructions in [DEPLOY.md](../../DEPLOY.md).
+
+Docker Compose 5.5.1 validated SQLite, bundled PostgreSQL and external PostgreSQL
+configurations using synthetic fixtures. Checks cover missing required values,
+database readiness, retained mounts, image pinning and host/container port mapping.
+No containers or provider requests were started by these configuration checks.
+
 ## Release 2.0.0
 
 [PR 1](https://github.com/hossman39/AIOManager/pull/1) is merged. The

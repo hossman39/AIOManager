@@ -13,6 +13,12 @@ aio-db-data
 **/*.pem
 **/*.secret
 coverage
+.cache
+backups
+**/*.aiobackup
+**/*.writer-lock
+**/*.writer-lock-journal
+**/server_fallback_keys.json
 
 # Development files
 .git
@@ -40,4 +46,5 @@ Thumbs.db
 # Docker files
 Dockerfile
 docker-compose.yml
+compose.*.yml
 .dockerignore

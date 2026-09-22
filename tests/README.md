@@ -1,4 +1,4 @@
-# Foundation tests
+# Application tests
 
 Current release adds `integration-api.test.mjs`, the SQLite/PostgreSQL shared
 `integration-contract.mjs`, and `account-health.test.ts`. These cover scoped API
@@ -59,9 +59,10 @@ rehearsals; see [membership evidence](../docs/planning/MEMBERSHIPS.md). Repeat w
 `node scripts/ui-rehearsal.mjs --seed-membership`, then `stop` to remove only its
 temporary test data. Native OS picker interaction still needs hands-on checking.
 
-Native provider integration and all legacy-writer gates, deployment-wide ownership,
-scheduled expiry polling/rechecks, activation, offboarding, daily backups,
-and Android/provider verification remain implementation work. The targeted
+Native provider integration, legacy-writer gates, deployment-wide ownership,
+scheduled expiry polling/rechecks, activation, offboarding and daily backups are
+implemented and covered by later tests in this document. Android TV/provider
+acceptance remains a live-environment check. The targeted
 `better-sqlite3` rebuild is required for native tests; a scripts-disabled install
 alone is insufficient. See [release gates](../docs/planning/VERIFICATION.md).
 

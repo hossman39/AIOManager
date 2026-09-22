@@ -1,104 +1,60 @@
-# Contributing to AIOManager
+﻿# Contributing to the managed AIOManager fork
 
-Thank you for even considering this. AIOManager started as something I built strictly for myself and I genuinely didn't expect anyone to find it, let alone want to contribute to it. PRs are welcome and I appreciate anyone willing to put in the time.
+This fork is maintained at [hossman39/AIOManager](https://github.com/hossman39/AIOManager).
+Open pull requests against its `main` branch. The upstream authors retain their
+credits in the README and license.
 
-Feel free to fork the project and build whatever you want. If I happen to see a PR and want to merge it, cool. If not, no worries! Just know that I am stepping back from active maintenance on this project and won't be actively reviewing issues, feature requests, or large architectural changes. Take the codebase and have fun with it!
+## Structure
 
----
+- `src/`: React, TypeScript and Vite interface.
+- `server/`: Fastify service, SQLite/PostgreSQL storage, encrypted records and jobs.
+- `server/managed/`: account policies, groups, expiry, provider execution and backups.
+- `shared/`: contracts and transformations used by the browser and server.
+- `tests/`: synthetic application and database tests.
+- `docs/planning/`: decisions and historical checkpoints; start with `PROGRESS.md`
+  for current status.
 
-## How the project is structured
+The server is required for managed accounts, sync, expiry and backups. Production
+uses one application container serving both the UI and backend. See
+[DEPLOY.md](DEPLOY.md); GitHub Pages/static hosting is not the deployment path.
 
-There are two parts to this:
+## Local development
 
-```
-/          The frontend (React + Vite + TypeScript)
-/server    The sync and Autopilot backend (Node.js + Fastify + SQLite)
-```
+Use Node 24 and the committed lockfile:
 
-The frontend is a fully client-side app. The server is optional and only needed if you're working on cloud sync, Autopilot rules, or webhooks. The app works fine without it using local storage only.
-
----
-
-## Getting it running locally
-
-### What you need
-
-- Node.js v18 or higher
-- npm v9 or higher
-
-### Frontend
-
-```bash
-npm install
-npm run dev
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm rebuild better-sqlite3 --ignore-scripts=false
+npm run managed:demo
 ```
 
-That runs on `http://localhost:5173` by default. For a production build it's just `npm run build`.
+The demo uses temporary synthetic accounts and a fake provider. It prints its
+local URL and login instructions; enter `stop` to shut it down and clean its own
+temporary data. This is the quickest way to review managed screens without using
+client accounts.
 
-### Server (only if you need it)
+For frontend development, create a local root `.env` with `PORT=16100`,
+`DATA_DIR=./data`, `DB_TYPE=sqlite`, and `MANAGED_WRITES_ENABLED=false`, then run
+`npm run dev`. Vite proxies `/api` to port 16100. Use only development credentials;
+the plain development server is not the synthetic demo. The Docker environment
+example uses port 1610 and `/app/data`, so adjust those values for local use.
 
-```bash
-cd server
-npm install
-npm run dev
+## Verification
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm audit --omit=dev --audit-level=high
 ```
 
-You'll need a `.env` file in the `/server` folder. Here's what it supports:
+CI runs Windows/Linux checks, PostgreSQL integration contracts, and AMD64/ARM64
+container smoke checks. PostgreSQL cases skip locally unless the dedicated test
+database is configured. See [tests/README.md](tests/README.md) for the test boundary
+and [docs/TESTING-MANAGED.md](docs/TESTING-MANAGED.md) for manual checks.
 
-```env
-# Encryption key for data at rest. If you leave this blank, a random one gets
-# generated and saved to server/data/.secret on the first run. That's fine for local dev.
-ENCRYPTION_KEY=
-
-# Port (default is 16100)
-PORT=16100
-
-# Where the database and secrets are stored (default is ./data)
-DATA_DIR=./data
-
-# Max concurrent proxy requests (default is 50)
-PROXY_CONCURRENCY_LIMIT=50
-```
-
-In dev, the frontend already proxies `/api` calls to `http://localhost:16100` through Vite. You don't need to configure anything, just run both and they connect.
-
----
-
-## The stack
-
-| | |
-|---|---|
-| Frontend | React 18, TypeScript, Vite |
-| Styling | Tailwind CSS + shadcn/ui |
-| State | Zustand |
-| Local storage | localforage (IndexedDB) |
-| Backend | Fastify, SQLite via better-sqlite3 |
-
----
-
-## Submitting a PR
-
-1. Fork the repo and create a branch off `main`
-2. Make your changes, keep them focused on one thing
-3. Test it manually end to end, there's no automated test suite right now
-4. Open a PR against `main` and describe what you changed and why
-
-### Good places to start
-
-- Open bug reports on GitHub
-- Edge case handling or error messages that could be clearer
-- Mobile and responsive layout issues
-- Docs
-
-### A few things to keep in mind
-
-- Keep changes small and targeted. One focused PR is a lot easier to review than a large one touching everything.
-- If you're fixing a bug, describe how to reproduce it.
-- There's no enforced linter in CI right now but try to match the style of the code around whatever you're touching.
-- This is maintained on a best-effort basis so reviews may take some time. I appreciate the patience.
-
----
-
-## Questions
-
-If something seems like a bug or you want to run an idea by me before writing code, just open a GitHub issue. That's the best place for it.
+Describe the problem, resulting behavior and relevant validation in the PR.
+Preserve stored configuration, idempotency and encryption boundaries. Keep real
+credentials, local databases, application archives and keys out of fixtures and
+commits. Update the deployment guide when changing runtime configuration.
