@@ -16,7 +16,7 @@ export function Footer() {
     // Simple GitHub Release check
     const checkUpdate = async () => {
       try {
-        const res = await fetch('https://api.github.com/repos/sonicx161/AIOManager/releases/latest')
+        const res = await fetch('https://api.github.com/repos/hossman39/AIOManager/releases/latest')
         if (res.ok) {
           const data = await res.json()
           const latestStr = data.tag_name
@@ -51,7 +51,7 @@ export function Footer() {
                 TorBox
               </a>
               <a
-                href="https://github.com/sonicx161/AIOManager"
+                href="https://github.com/hossman39/AIOManager"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150 border md:border-transparent"
@@ -115,11 +115,13 @@ export function Footer() {
                       className="text-[10px] sm:text-xs font-mono text-muted-foreground/40 hover:text-primary select-none uppercase tracking-widest transition-colors"
                       title="View release notes"
                     >
-                      v{version}{build ? ` (Build ${build})` : ''}
+                      v{version}
+                      {build ? ` (Build ${build})` : ''} ·{' '}
+                      {String(import.meta.env.VITE_BUILD_COMMIT || 'local').slice(0, 8)}
                     </button>
                     {updateAvailable && (
                       <a
-                        href="https://github.com/sonicx161/AIOManager/releases"
+                        href="https://github.com/hossman39/AIOManager/releases"
                         target="_blank"
                         rel="noreferrer"
                         className="bg-primary/10 text-primary hover:bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors"

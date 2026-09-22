@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
@@ -26,6 +26,13 @@ import { AccountNameEditor } from '@/components/managed/AccountNameEditor'
 import { useUnsavedWarning } from '@/components/managed/useManagedSubmission'
 import { accountStatus, membershipLabel } from '@/components/managed/account-labels'
 import type { createManagedApi, ManagedAccount } from '@/api/managed'
+import {
+  accountAttention,
+  backupAttention,
+  compareAccounts,
+  expiresWithin,
+  isExpired,
+} from '@/lib/managed/account-health'
 
 const PAGE_SIZE = 12
 const MAX_SELECTION = 200
@@ -43,6 +50,12 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
   const openAddAccount = useUIStore((state) => state.openAddAccountDialog)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
+  const [sort, setSort] = useState('name')
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(0)
@@ -52,12 +65,14 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
     account: ManagedAccount
   } | null>(null)
   const [notice, setNotice] = useState('')
-  const locked =
-    inventory.loading ||
-    connected.busy ||
-    Boolean(editing) ||
-    Boolean(bulk)
+  const locked = inventory.loading || connected.busy || Boolean(editing) || Boolean(bulk)
   useUnsavedWarning(selected.size > 0)
+  const refreshInventory = inventory.refresh
+  useEffect(() => {
+    if (editing || bulk || selected.size || connected.busy) return
+    const timer = setInterval(() => void refreshInventory(true), 30_000)
+    return () => clearInterval(timer)
+  }, [editing, bulk, selected.size, connected.busy, refreshInventory])
   const accounts = [...inventory.accounts]
   for (const connection of connected.connections)
     if (connection.account && !accounts.some((row) => row.id === connection.account!.id))
@@ -68,13 +83,9 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
       !connected.connections.some((link) => link.localId === local.id && link.status === 'removed')
   )
   const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase())
-  accounts.sort(
-    (a, b) =>
-      (a.name || a.email).localeCompare(b.name || b.email, undefined, {
-        sensitivity: 'base',
-        numeric: true,
-      }) || a.id.localeCompare(b.id)
-  )
+  accounts.sort((a, b) => compareAccounts(a, b, sort))
+  const backupWarning = backupAttention(inventory.status, now)
+  const needsAttention = accounts.filter((account) => accountAttention(account, now).length > 0)
   const shown = accounts.filter(
     (account) =>
       matches(`${account.name} ${account.email}`) &&
@@ -82,8 +93,14 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
         (filter === 'individual'
           ? !account.groupId
           : filter === 'expired'
-            ? account.expired || account.suspendedAt !== null
-            : account.groupId === filter))
+            ? isExpired(account, now)
+            : filter === 'expiring-7'
+              ? expiresWithin(account, 7, now)
+              : filter === 'expiring-30'
+                ? expiresWithin(account, 30, now)
+                : filter === 'attention'
+                  ? accountAttention(account, now).length > 0
+                  : account.groupId === filter))
   )
   const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount - 1)
@@ -137,14 +154,15 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           </DropdownMenu>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           ['Accounts', total],
-          ['In groups', accounts.filter((account) => account.groupId).length],
           [
-            'Expired',
-            accounts.filter((account) => account.expired || account.suspendedAt !== null).length,
+            'Expiring in 7 days',
+            accounts.filter((account) => expiresWithin(account, 7, now)).length,
           ],
+          ['Needs attention', needsAttention.length + pending.length],
+          ['Expired', accounts.filter((account) => isExpired(account, now)).length],
         ].map(([label, count]) => (
           <div className="rounded-xl border bg-card px-4 py-3" key={label}>
             <p className="text-xs text-muted-foreground">{label}</p>
@@ -161,6 +179,17 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
             Open sync settings
           </Link>{' '}
           to resume.
+        </p>
+      )}
+      {backupWarning && (
+        <p
+          role="alert"
+          className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"
+        >
+          {backupWarning}{' '}
+          <Link className="underline" to="/settings#account-sync">
+            Open sync settings
+          </Link>
         </p>
       )}
       {(inventory.error || connected.error) && (
@@ -198,11 +227,27 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           <option value="all">All accounts</option>
           <option value="individual">Individual accounts</option>
           <option value="expired">Expired accounts</option>
+          <option value="expiring-7">Expiring in 7 days</option>
+          <option value="expiring-30">Expiring in 30 days</option>
+          <option value="attention">Needs attention</option>
           {inventory.groups.map((group) => (
             <option key={group.id} value={group.id}>
               {group.name}
             </option>
           ))}
+        </select>
+        <select
+          className="h-10 max-w-full rounded-md border bg-background px-3 text-sm"
+          aria-label="Sort accounts"
+          value={sort}
+          disabled={Boolean(bulk) || Boolean(editing)}
+          onChange={(event) => {
+            setSort(event.target.value)
+            setPage(0)
+          }}
+        >
+          <option value="name">Name A–Z</option>
+          <option value="expiry">Expiry — earliest first</option>
         </select>
         <Button
           variant={selecting ? 'secondary' : 'outline'}
@@ -377,6 +422,13 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
                 </dd>
               </div>
             </dl>
+            {accountAttention(account, now).length > 0 && (
+              <ul className="mb-4 space-y-1 text-xs text-amber-600 dark:text-amber-400">
+                {accountAttention(account, now).map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            )}
             <div className="mt-auto flex items-center justify-between gap-2 border-t pt-4">
               <span
                 className={`text-xs ${account.expired ? 'text-amber-500' : 'text-muted-foreground'}`}
@@ -391,7 +443,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
             </div>
           </article>
         ))}
-        {filter === 'all' &&
+        {(filter === 'all' || filter === 'attention') &&
           pending
             .filter((local) => matches(`${local.name} ${local.email}`))
             .map((local) => (
@@ -471,7 +523,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
         !connected.busy &&
         !connected.waiting &&
         shown.length === 0 &&
-        (filter !== 'all' || pending.length === 0) && (
+        (!['all', 'attention'].includes(filter) || pending.length === 0) && (
           <div className="rounded-xl border border-dashed p-12 text-center">
             <UsersRound className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
             <h3 className="font-medium">

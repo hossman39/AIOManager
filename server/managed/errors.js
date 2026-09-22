@@ -1,5 +1,9 @@
 const definitions = {
   UNAUTHORIZED: [401, 'A valid manager login is required.'],
+  FORBIDDEN: [403, 'This API key does not allow this operation.'],
+  API_KEY_LIMIT: [409, 'Revoke an unused API key before creating another. The active limit is 20.'],
+  ACCOUNT_EXISTS: [409, 'This account already exists. Link its account ID explicitly.'],
+  RATE_LIMITED: [429, 'Too many API requests. Wait for the Retry-After interval.'],
   NOT_FOUND: [404, 'The managed record was not found.'],
   INVALID_INPUT: [400, 'The managed request is invalid.'],
   INVALID_EXPIRY: [422, 'Select a valid expiry date and time.'],

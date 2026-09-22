@@ -12,6 +12,8 @@ import { createManagedOperations } from './operations.js'
 import { createManagedConnections } from './connections.js'
 import { createAccountAddonRepository } from './account-addons.js'
 import { lockAccountSelection, lockGroupMembers, memberSelectionSchema } from './group-members.js'
+import { createApiKeyRepository } from './api-keys.js'
+import { createIntegrationRepository } from './integration.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
@@ -44,6 +46,7 @@ export function createManagedRepository({
   now = Date.now,
   validateManifests,
   runtime,
+  backupsEnabled = true,
 }) {
   const authorize = (auth) => authenticateManager(db, auth, legacyKeys)
   const jobs = createManagedJobStore({ db, crypto, now })
@@ -281,10 +284,32 @@ export function createManagedRepository({
       verifiedAt: row.verified_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      ...(row.sync_job_state !== undefined
+        ? {
+            syncJob:
+              row.sync_job_state === null
+                ? null
+                : {
+                    state: row.sync_job_state,
+                    errorCode: row.sync_job_error,
+                    dueAt: row.sync_job_due,
+                    updatedAt: row.sync_job_updated,
+                  },
+          }
+        : {}),
     }
   }
 
   return Object.freeze({
+    ...createApiKeyRepository({ db, authorize, ownerTransaction }),
+    ...createIntegrationRepository({
+      db,
+      crypto,
+      authorize,
+      ownerTransaction,
+      idempotent,
+      publicAccount,
+    }),
     ...createManagedConnections({ crypto, ownerTransaction, publicAccount }),
     ...createExpiryNoticeRepository({ db, crypto, authorize, ownerTransaction, idempotent, jobs }),
     ...createAccountAddonRepository({
@@ -520,9 +545,16 @@ export function createManagedRepository({
         throw new ManagedError('INVALID_INPUT')
       const owner = await authorize(auth)
       const rows = await db.query(
-        `SELECT * FROM managed_accounts WHERE owner_id = $1 AND id > $2
-        ${view === 'expired' ? "AND state = 'active' AND (suspended_at IS NOT NULL OR (lifetime = 0 AND expiry_at <= $4))" : ''}
-        ORDER BY id LIMIT $3`,
+        `SELECT a.*, j.state AS sync_job_state, j.error_code AS sync_job_error,
+          j.due_at AS sync_job_due, j.updated_at AS sync_job_updated
+        FROM managed_accounts a LEFT JOIN managed_jobs j ON j.id = (
+          SELECT latest.id FROM managed_jobs latest
+          WHERE latest.owner_id = a.owner_id AND latest.account_id = a.id
+            AND latest.policy_version = a.policy_version AND latest.state <> 'superseded'
+          ORDER BY latest.priority DESC, latest.created_at DESC, latest.id LIMIT 1
+        ) WHERE a.owner_id = $1 AND a.id > $2
+        ${view === 'expired' ? "AND a.state = 'active' AND (a.suspended_at IS NOT NULL OR (a.lifetime = 0 AND a.expiry_at <= $4))" : ''}
+        ORDER BY a.id LIMIT $3`,
         view === 'expired' ? [owner, after, limit + 1, now()] : [owner, after, limit + 1]
       )
       return {
@@ -566,6 +598,7 @@ export function createManagedRepository({
           passiveImport: true,
           providerWrites: live.enabled,
           groupPublication: typeof validateManifests === 'function',
+          backupsEnabled,
         },
         writePaused: live.writePaused || !settings || settings.write_paused === 1,
         writerReady: live.ready,

@@ -1,8 +1,10 @@
 import { decrypt } from '../crypto.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
+import { authenticateApiKey } from './api-keys.js'
 
 export async function authenticateManager(db, auth, keys, { lock = false } = {}) {
+  if (auth?.apiKey) return (await authenticateApiKey(db, auth, { lock })).owner
   if (
     !auth ||
     typeof auth.owner !== 'string' ||

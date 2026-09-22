@@ -11,6 +11,7 @@ import { managedGroupMembersContract } from './managed-group-members-contract.mj
 import { managedPublicationContract } from './managed-publication-contract.mjs'
 import { managedWorkerContract } from './managed-worker-contract.mjs'
 import { managedRuntimeContract } from './managed-runtime-contract.mjs'
+import { integrationContract } from './integration-contract.mjs'
 import { acquireWriterOwnership } from '../server/managed/writer-owner.js'
 import { writeManagedBackup, restoreManagedBackup } from '../server/managed/backups.js'
 import { firstAuth, parsedAccounts, syntheticKey } from './managed-contract.mjs'
@@ -75,6 +76,9 @@ managedWorkerContract('PostgreSQL managed execution', options, async (t, fixture
   prepareManagedFixture(await fixture(t), fixtureOptions)
 )
 managedRuntimeContract('PostgreSQL managed lifecycle', options, async (t) =>
+  prepareManagedFixture(await fixture(t))
+)
+integrationContract('PostgreSQL integration access', options, async (t) =>
   prepareManagedFixture(await fixture(t))
 )
 

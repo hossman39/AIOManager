@@ -1,10 +1,48 @@
 # Implementation progress
 
-Updated 2026-09-22. The managed runtime is now connected in an isolated testing
-candidate. No paying accounts, production database, or production deployment has
-been accessed or modified. Branch checkpoints/CI do not authorize production rollout.
+Updated 2026-09-22. The owner authorized finishing release cleanup and deployment,
+with Android TV acceptance in the live environment and whole-server backups deferred.
+No paying accounts or production database have been modified during this increment.
+The deployment target/access is still needed; publishing an image is not a VPS deployment.
 
-## Current testing increment
+## Release preparation: 2.0.0
+
+Accounts now offers expiring-in-7/30-days filters, expiry sorting and Needs attention
+for incomplete setup, failed/retrying jobs and delayed work. The current-policy job
+summary is read with the inventory, avoiding per-account requests. Quiet refreshes
+pause while editing or selecting. Application-backup status distinguishes disabled,
+never recorded and over-26-hours-old archives. Server-wide backup infrastructure
+remains outside this increment.
+
+Settings includes API integrations with owner-scoped, revocable, expiring keys.
+The new `/api/v1` supports account staging/explicit external-reference linking,
+memberships, group assignment/publication, addon settings, first-sync review,
+sync, password repair and verified offboarding. Operation history and action-scoped
+receipts support restart/lost-response recovery. Addon URLs, saved credentials and
+removal require separate permissions. Keys cannot manage keys or resume global sync.
+Migration 9 and encrypted backups include key digests and external references.
+The API does not register Stremio identities, buy IPTV/debrid/TiviMate services,
+or implement billing. TV Box Manager's client integration is a separate step.
+See [API.md](../API.md) and its generated OpenAPI document.
+
+Deployment/update references use the fork, image selection requires a tested SHA
+tag/digest, the footer shows version/build identity, and the README/deployment guide
+describe the managed workflow. The existing upstream author credits are retained.
+
+Local validation: 358 tests pass, 144 PostgreSQL cases await hosted CI; typecheck,
+lint and build pass. New coverage exercises key hashing/scopes/expiry/revocation,
+cross-owner denial, exact/concurrent retries, token rotation, restart recovery,
+API-driven activation/expiry/renewal/removal, transaction rollback, rate limits,
+backup restoration, current-policy job visibility and expiry-window boundaries.
+All provider traffic in those checks is synthetic.
+
+An isolated browser rehearsal confirms key creation and permissions, connection
+discovery and dated membership via the issued key, key revocation, the unsaved-key
+navigation guard, expiry filtering/sorting and Needs attention. Account and API
+screens fit a 390px viewport without horizontal overflow. Hosted and deployment
+evidence will be recorded separately after those actions complete.
+
+## Earlier account editing checkpoint
 
 Account cards now have direct editors for display name, group and membership.
 The account list has a **Select** button, selection across filters/pages and

@@ -203,6 +203,18 @@ Start the restored instance with writes disabled and review it before resuming.
 This archive requires its matching schema version; use that image to restore,
 then perform normal forward migrations. Do not run an old image over a newer schema.
 
+## API integration and account attention
+
+Use **Settings → API integrations** to create a dedicated test key. Select only
+the required permissions. Verify `/api/v1/me`, staged account creation, exact retry,
+membership edits and operation polling as described in [API.md](API.md). Revoke the
+key and confirm it no longer authenticates. Keep real customer credentials out of
+test fixtures and plain JSON config files.
+
+On Accounts, check the 7/30-day expiry filters, expiry sorting and Needs attention.
+The latter shows incomplete setup, failed/retrying sync and delayed jobs. Backup
+warnings refer to application archives; they do not claim an off-server backup.
+
 ## Evidence and remaining acceptance
 
 Local tests cover the complete synthetic HTTP lifecycle, native response bounds,

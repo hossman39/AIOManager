@@ -79,6 +79,13 @@ export async function registerManagedRoutes(app, repository, manifestService) {
         })
       })
       routes.get('/status', (request) => repository.status(request.managedAuth))
+      routes.get('/api-keys', (request) => repository.listApiKeys(request.managedAuth))
+      routes.post('/api-keys', { bodyLimit: 4096 }, (request) =>
+        repository.createApiKey(request.managedAuth, request.body)
+      )
+      routes.post('/api-keys/:id/revoke', { bodyLimit: 4096 }, (request) =>
+        repository.revokeApiKey(request.managedAuth, request.params.id)
+      )
       routes.post('/accounts/connect', { bodyLimit: 1024 * 1024 }, (request) =>
         repository.connectAccounts(request.managedAuth, request.body)
       )

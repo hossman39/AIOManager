@@ -68,6 +68,15 @@ const accountSchema = z
     verifiedAt: z.number().int().nullable(),
     createdAt: z.number().int(),
     updatedAt: z.number().int(),
+    syncJob: z
+      .object({
+        state: z.enum(['pending', 'running', 'retrying', 'verified', 'failed', 'superseded']),
+        errorCode: z.string().nullable(),
+        dueAt: z.number().int(),
+        updatedAt: z.number().int(),
+      })
+      .nullable()
+      .optional(),
   })
   .refine((account) => (account.membershipType === 'term') === (account.expiry !== null))
 const accountsSchema = z.object({
@@ -102,6 +111,7 @@ const statusSchema = z.object({
     passiveImport: z.boolean(),
     providerWrites: z.boolean(),
     groupPublication: z.boolean().default(false),
+    backupsEnabled: z.boolean().default(true),
   }),
   writePaused: z.boolean(),
   ownerWritePaused: z.boolean(),
@@ -116,6 +126,16 @@ const statusSchema = z.object({
     offboarding: z.number().int(),
   }),
 })
+const apiKeySchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  scopes: z.array(z.string()),
+  createdAt: z.number().int(),
+  expiresAt: z.number().int(),
+  revokedAt: z.number().int().nullable(),
+  lastUsedAt: z.number().int().nullable(),
+})
+export type IntegrationKey = z.infer<typeof apiKeySchema>
 const expiryNoticeSettingsSchema = z.object({
   enabled: z.boolean(),
   baseUrl: z.string(),
@@ -417,6 +437,8 @@ const errorMessages = {
   NETWORK_ERROR:
     'The server could not be reached. A submitted change may already be saved; retry the same request to confirm.',
   REQUEST_FAILED: 'The operation could not be completed. No success has been confirmed.',
+  API_KEY_LIMIT: 'Revoke an unused key first. You can have up to 20 active API keys.',
+  FORBIDDEN: 'This API key does not permit that action.',
   CANCELLED: 'The request was cancelled.',
   INVALID_SERVER: 'Check the configured sync server URL before importing credentials.',
 } as const
@@ -514,6 +536,16 @@ export function createManagedApi({
   }
   return {
     status: (signal?: AbortSignal) => request('/status', statusSchema, { signal }),
+    apiKeys: (signal?: AbortSignal) =>
+      request('/api-keys', z.object({ keys: z.array(apiKeySchema), scopes: z.array(z.string()) }), {
+        signal,
+      }),
+    createApiKey: (body: { name: string; scopes: string[]; expiresInDays: number }) =>
+      request('/api-keys', z.object({ key: apiKeySchema, token: z.string() }), { body }),
+    revokeApiKey: (id: string) =>
+      request(`/api-keys/${encodeURIComponent(id)}/revoke`, z.object({ revoked: z.boolean() }), {
+        body: {},
+      }),
     expiryNotice: (signal?: AbortSignal) =>
       request('/expiry-notice', expiryNoticeSchema, { signal }),
     saveExpiryNotice: (

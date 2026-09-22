@@ -1,5 +1,10 @@
 # Foundation tests
 
+Current release adds `integration-api.test.mjs`, the SQLite/PostgreSQL shared
+`integration-contract.mjs`, and `account-health.test.ts`. These cover scoped API
+access, recoverable account workflows and attention/expiry boundaries. All external
+provider requests remain synthetic. See [API.md](../docs/API.md) for the public contract.
+
 Run on Node 24.14.0 (the verified local runtime):
 
 ```sh

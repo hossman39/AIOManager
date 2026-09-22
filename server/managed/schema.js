@@ -231,6 +231,21 @@ ALTER TABLE managed_accounts ADD COLUMN addons_initialized INTEGER NOT NULL DEFA
 ALTER TABLE managed_owners ADD COLUMN expiry_notice_token TEXT;
 CREATE UNIQUE INDEX managed_owners_expiry_notice ON managed_owners (expiry_notice_token);`,
   }),
+  Object.freeze({
+    version: 9,
+    name: 'integration-access-and-references',
+    sql: `CREATE TABLE managed_api_keys (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES managed_owners(owner_id),
+  name TEXT NOT NULL, token_hash TEXT NOT NULL, scopes TEXT NOT NULL,
+  created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL, revoked_at BIGINT, last_used_at BIGINT
+);
+CREATE INDEX managed_api_keys_owner ON managed_api_keys (owner_id, created_at);
+CREATE TABLE managed_external_refs (
+  owner_id TEXT NOT NULL REFERENCES managed_owners(owner_id),
+  external_ref TEXT NOT NULL, account_id TEXT NOT NULL, created_at BIGINT NOT NULL,
+  PRIMARY KEY (owner_id, external_ref)
+);`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

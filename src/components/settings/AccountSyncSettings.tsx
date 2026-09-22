@@ -44,7 +44,12 @@ function SyncSettings({ api }: { api: ReturnType<typeof createManagedApi> }) {
       </p>
       {error && <p role="alert">{error}</p>}
       {status ? (
-        <ManagedRuntimeControls api={api} status={status} onChanged={() => void load()} />
+        <>
+          <ManagedRuntimeControls api={api} status={status} onChanged={() => void load()} />
+          <Button variant="outline" onClick={() => void load()}>
+            Refresh sync and backup status
+          </Button>
+        </>
       ) : (
         <Button variant="outline" onClick={() => void load()}>
           Reload settings

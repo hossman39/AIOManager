@@ -20,6 +20,8 @@ import { createManagedRuntime } from './managed/runtime.js'
 import { createStremioProvider } from './managed/stremio.js'
 import { ManagedError } from './managed/errors.js'
 import { createManagedBackupScheduler } from './managed/backups.js'
+import { registerIntegrationRoutes } from './api/v1.js'
+import packageInfo from '../package.json' with { type: 'json' }
 // let LZString import removed - obsolete
 
 // Construction does not bind a port, install signal handlers, or start jobs.
@@ -367,6 +369,7 @@ export async function buildServer(options = {}) {
       legacyKeys: FALLBACK_KEYS,
       validateManifests: manifestService.validateManifests,
       runtime: managedRuntime,
+      backupsEnabled: env.MANAGED_BACKUPS_ENABLED !== 'false',
     })
 
     // Migration: Add addon_list column if it doesn't exist (for existing databases)
@@ -515,6 +518,10 @@ export async function buildServer(options = {}) {
     // Register Gzip Compression (Reduces network payload size by ~80%)
     await fastify.register(fastifyCompress, { global: true })
     await registerManagedRoutes(fastify, managedRepository, manifestService)
+    await registerIntegrationRoutes(fastify, managedRepository, db, {
+      version: packageInfo.version,
+      instanceId: managedCrypto.fingerprint('api-v1', { owner: 'deployment', id: 'instance', purpose: 'public-id' }),
+    })
     await registerExpiryNoticeRoutes(fastify, { db, crypto: managedCrypto })
 
     // Serve Static Files

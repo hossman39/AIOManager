@@ -91,6 +91,8 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
       randomUUID()
     )
     const keys = { primary: syntheticKey, candidates: [syntheticKey, 'synthetic-retired-key'] }
+    const accessKey = await s.repository.createApiKey(firstAuth, { name: 'Backup integration', scopes: ['read'], expiresInDays: 365 })
+    await s.repository.linkIntegrationAccount(firstAuth, { externalRef: 'backup:customer', accountId: id }, randomUUID())
     scheduler = createManagedBackupScheduler({ db: source, keys, directory, now: s.now })
     const backup = await scheduler.run()
     assert.ok(backup.filename)
@@ -133,6 +135,8 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     assert.equal(account.setupSaved, true)
     const setup = await repository.getAccountAddons(firstAuth, id)
     assert.deepEqual(setup.addons, [custom])
+    assert.equal((await repository.listApiKeys(firstAuth)).keys[0].id, accessKey.key.id)
+    assert.equal((await repository.integrationAccount(firstAuth, 'backup:customer')).accountId, id)
     assert.deepEqual((await repository.getExpiryNotice(firstAuth)).settings, expiryNotice.settings)
     assert.deepEqual(setup.overrides.addons, [custom])
     assert.equal(

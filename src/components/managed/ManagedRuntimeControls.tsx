@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import type { createManagedApi, ManagedSettings, ManagedStatus } from '@/api/managed'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
+import { backupAttention } from '@/lib/managed/account-health'
 
 export function ManagedRuntimeControls({
   api,
@@ -67,6 +68,11 @@ export function ManagedRuntimeControls({
         Last encrypted backup:{' '}
         {status.lastBackupAt ? new Date(status.lastBackupAt).toLocaleString() : 'Not yet recorded'}.
       </p>
+      {backupAttention(status) && (
+        <p role="alert" className="text-sm text-amber-600 dark:text-amber-400">
+          {backupAttention(status)}
+        </p>
+      )}
       {mutation.message && (
         <p role="alert" className="text-sm text-destructive">
           {mutation.message}

@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AccountSyncSettings } from '@/components/settings/AccountSyncSettings'
+import { IntegrationSettings } from '@/components/settings/IntegrationSettings'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useAccountStore } from '@/store/accountStore'
 import { useAddonStore } from '@/store/addonStore'
@@ -56,7 +57,7 @@ export function SettingsPage() {
     const { clear: clearLibraryCache } = useLibraryCache()
 
     const hash = location.hash.replace('#', '')
-    const activeTab = ['general', 'account-sync', 'appearance', 'data', 'advanced'].includes(hash) ? hash : 'general'
+    const activeTab = ['general', 'account-sync', 'integrations', 'appearance', 'data', 'advanced'].includes(hash) ? hash : 'general'
 
     const handleTabChange = (val: string) => {
         navigate({ pathname: location.pathname, search: location.search, hash: `#${val}` }, { replace: true })
@@ -173,6 +174,9 @@ export function SettingsPage() {
                     <TabsTrigger value="account-sync" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-full px-4 border border-border/50 data-[state=active]:border-transparent bg-muted/30 shrink-0 shadow-sm transition-all">
                         <RefreshCw className="h-3.5 w-3.5 mr-2" />Account sync
                     </TabsTrigger>
+                    <TabsTrigger value="integrations" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-full px-4 border border-border/50 data-[state=active]:border-transparent bg-muted/30 shrink-0 shadow-sm transition-all">
+                        API integrations
+                    </TabsTrigger>
                     <TabsTrigger value="data" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-full px-4 border border-border/50 data-[state=active]:border-transparent bg-muted/30 shrink-0 shadow-sm transition-all">
                         <Database className="h-3.5 w-3.5 mr-2" />Data & Sync
                     </TabsTrigger>
@@ -186,6 +190,10 @@ export function SettingsPage() {
                         <AccountSyncSettings />
                     </TabsContent>
                     {/* General Tab */}
+                    <TabsContent value="integrations" className="mt-0">
+                        <IntegrationSettings />
+                    </TabsContent>
+
                     <TabsContent value="general" className="mt-0">
                         <div className="grid gap-6">
                             <AccountSection />

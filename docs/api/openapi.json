@@ -1,0 +1,3392 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "AIOManager integration API",
+    "version": "1.0.0",
+    "description": "Application 2.0.0. All timestamps are Unix milliseconds; membership also includes local wall time and IANA timezone. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "AIOManager API key"
+      }
+    },
+    "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "staged",
+              "active",
+              "offboarding"
+            ]
+          },
+          "groupId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "setupSaved": {
+            "type": "boolean"
+          },
+          "membershipType": {
+            "enum": [
+              "unset",
+              "term",
+              "lifetime"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expiry": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "at": {
+                    "type": "integer"
+                  },
+                  "local": {
+                    "type": "string"
+                  },
+                  "offset": {
+                    "type": "number"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "at",
+                  "local",
+                  "offset",
+                  "timezone"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "suspendedAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeMode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "appliedVersion": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "appliedTarget": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "suspended",
+                  "offboard"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verifiedAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "state",
+          "groupId",
+          "setupSaved",
+          "membershipType",
+          "version",
+          "policyVersion",
+          "expiry",
+          "expired",
+          "suspendedAt",
+          "safeMode",
+          "appliedVersion",
+          "appliedTarget",
+          "verifiedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": true
+      },
+      "AccountResult": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/Account"
+          },
+          "jobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account",
+          "jobId",
+          "replayed"
+        ],
+        "additionalProperties": false
+      },
+      "CreateAccount": {
+        "type": "object",
+        "properties": {
+          "externalRef": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "writeOnly": true
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "required": [
+          "externalRef",
+          "email",
+          "password"
+        ],
+        "additionalProperties": false
+      },
+      "LinkAccount": {
+        "type": "object",
+        "properties": {
+          "externalRef": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "externalRef",
+          "accountId"
+        ],
+        "additionalProperties": false
+      },
+      "Version": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "expectedVersion"
+        ],
+        "additionalProperties": false
+      },
+      "Membership": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "expectedVersion": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "mode": {
+                "const": "lifetime"
+              }
+            },
+            "required": [
+              "expectedVersion",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "expectedVersion": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "mode": {
+                "const": "term"
+              },
+              "local": {
+                "type": "string",
+                "examples": [
+                  "2027-01-15T18:00"
+                ]
+              },
+              "timezone": {
+                "type": "string",
+                "examples": [
+                  "America/New_York"
+                ]
+              },
+              "offset": {
+                "type": "number",
+                "description": "UTC offset in minutes; supply to disambiguate a repeated local time."
+              }
+            },
+            "required": [
+              "expectedVersion",
+              "mode",
+              "local"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "BulkMembership": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "expectedVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "id",
+                "expectedVersion"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 200
+          },
+          "membership": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "const": "lifetime"
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "const": "term"
+                  },
+                  "local": {
+                    "type": "string",
+                    "examples": [
+                      "2027-01-15T18:00"
+                    ]
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "examples": [
+                      "America/New_York"
+                    ]
+                  },
+                  "offset": {
+                    "type": "number",
+                    "description": "UTC offset in minutes; supply to disambiguate a repeated local time."
+                  }
+                },
+                "required": [
+                  "mode",
+                  "local"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "accounts",
+          "membership"
+        ],
+        "additionalProperties": false
+      },
+      "Assignment": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "expectedVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "id",
+                "expectedVersion"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 200
+          },
+          "useGroupAddons": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "groupId",
+          "accounts"
+        ],
+        "additionalProperties": false
+      },
+      "AccountAddons": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "groupVersion": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "manifest",
+                "transportUrl"
+              ],
+              "properties": {
+                "manifest": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version",
+                    "name",
+                    "resources",
+                    "types"
+                  ],
+                  "additionalProperties": true
+                },
+                "transportUrl": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "additionalProperties": true
+            },
+            "maxItems": 200
+          },
+          "allowEmpty": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "groupVersion",
+          "addons"
+        ],
+        "additionalProperties": false
+      },
+      "ActivationPreview": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "safeMode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "safeMode"
+        ],
+        "additionalProperties": false
+      },
+      "Activation": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "receipt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "allowEmpty": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "receipt"
+        ],
+        "additionalProperties": false
+      },
+      "Group": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "manifest",
+                "transportUrl"
+              ],
+              "properties": {
+                "manifest": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version",
+                    "name",
+                    "resources",
+                    "types"
+                  ],
+                  "additionalProperties": true
+                },
+                "transportUrl": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "additionalProperties": true
+            },
+            "maxItems": 200
+          },
+          "safeMode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "GroupPublication": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "manifest",
+                "transportUrl"
+              ],
+              "properties": {
+                "manifest": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version",
+                    "name",
+                    "resources",
+                    "types"
+                  ],
+                  "additionalProperties": true
+                },
+                "transportUrl": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "additionalProperties": true
+            },
+            "maxItems": 200
+          },
+          "safeMode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowEmpty": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "name",
+          "addons",
+          "safeMode"
+        ],
+        "additionalProperties": false
+      },
+      "Operation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "target": {
+            "enum": [
+              "active",
+              "suspended",
+              "offboard"
+            ]
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "running",
+              "retrying",
+              "verified",
+              "failed",
+              "superseded"
+            ]
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "accountId",
+          "policyVersion",
+          "target",
+          "state",
+          "errorCode",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "GroupSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "publishedRevision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "safeMode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effectiveSafeMode": {
+            "type": "boolean"
+          },
+          "addonCount": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "version",
+          "publishedRevision",
+          "archived",
+          "safeMode",
+          "effectiveSafeMode",
+          "addonCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "GroupRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "publishedRevision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "safeMode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effectiveSafeMode": {
+            "type": "boolean"
+          },
+          "addonCount": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          },
+          "draft": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "manifest",
+                "transportUrl"
+              ],
+              "properties": {
+                "manifest": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version",
+                    "name",
+                    "resources",
+                    "types"
+                  ],
+                  "additionalProperties": true
+                },
+                "transportUrl": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "additionalProperties": true
+            },
+            "maxItems": 200
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "version",
+          "publishedRevision",
+          "archived",
+          "safeMode",
+          "effectiveSafeMode",
+          "addonCount",
+          "createdAt",
+          "updatedAt",
+          "draft"
+        ],
+        "additionalProperties": false
+      },
+      "GroupResult": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GroupRecord"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "group",
+          "replayed"
+        ],
+        "additionalProperties": false
+      },
+      "ReferenceResult": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Account"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "externalRef": {
+            "type": "string"
+          },
+          "removed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account",
+          "accountId",
+          "externalRef",
+          "removed"
+        ],
+        "additionalProperties": false
+      },
+      "LinkedAccount": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/Account"
+          },
+          "externalRef": {
+            "type": "string"
+          },
+          "jobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account",
+          "externalRef",
+          "jobId",
+          "replayed"
+        ],
+        "additionalProperties": false
+      },
+      "BulkResult": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "account": {
+                  "$ref": "#/components/schemas/Account"
+                },
+                "jobId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "account",
+                "jobId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accounts",
+          "replayed"
+        ],
+        "additionalProperties": false
+      },
+      "Execution": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Account"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "removedAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "running",
+                      "retrying",
+                      "verified",
+                      "failed",
+                      "superseded"
+                    ]
+                  },
+                  "target": {
+                    "enum": [
+                      "active",
+                      "suspended",
+                      "offboard"
+                    ]
+                  },
+                  "attempts": {
+                    "type": "integer"
+                  },
+                  "errorCode": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dueAt": {
+                    "type": "integer"
+                  },
+                  "updatedAt": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "state",
+                  "target",
+                  "attempts",
+                  "errorCode",
+                  "dueAt",
+                  "updatedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "account",
+          "removedAt",
+          "job"
+        ],
+        "additionalProperties": false
+      },
+      "FirstSyncReview": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "safeMode": {
+            "type": "boolean"
+          },
+          "target": {
+            "enum": [
+              "active",
+              "suspended"
+            ]
+          },
+          "beforeCount": {
+            "type": "integer"
+          },
+          "afterCount": {
+            "type": "integer"
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "receipt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accountId",
+          "version",
+          "safeMode",
+          "target",
+          "beforeCount",
+          "afterCount",
+          "addons",
+          "receipt",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "PublicationResult": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GroupRecord"
+          },
+          "deploymentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "queued": {
+            "type": "integer"
+          },
+          "unchanged": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "group",
+          "deploymentId",
+          "revision",
+          "queued",
+          "unchanged",
+          "replayed"
+        ],
+        "additionalProperties": false
+      },
+      "Deployment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "groupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "integer"
+              },
+              "running": {
+                "type": "integer"
+              },
+              "retrying": {
+                "type": "integer"
+              },
+              "verified": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "superseded": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "pending",
+              "running",
+              "retrying",
+              "verified",
+              "failed",
+              "superseded"
+            ],
+            "additionalProperties": false
+          },
+          "skipped": {
+            "type": "object",
+            "properties": {
+              "staged": {
+                "type": "integer"
+              },
+              "offboarding": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "staged",
+              "offboarding"
+            ],
+            "additionalProperties": false
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "jobId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "policyVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "target": {
+                  "enum": [
+                    "active",
+                    "suspended"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "running",
+                    "retrying",
+                    "verified",
+                    "failed",
+                    "superseded"
+                  ]
+                },
+                "errorCode": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "accountId",
+                "jobId",
+                "policyVersion",
+                "target",
+                "status",
+                "errorCode"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "groupId",
+          "revision",
+          "createdAt",
+          "counts",
+          "skipped",
+          "members"
+        ],
+        "additionalProperties": false
+      },
+      "Connection": {
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string"
+          },
+          "applicationVersion": {
+            "type": "string"
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "ownerId": {
+            "type": "string"
+          },
+          "key": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              },
+              "revokedAt": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastUsedAt": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "scopes",
+              "createdAt",
+              "expiresAt",
+              "revokedAt",
+              "lastUsedAt"
+            ],
+            "additionalProperties": false
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "apiVersion",
+          "applicationVersion",
+          "instanceId",
+          "ownerId",
+          "key",
+          "capabilities"
+        ],
+        "additionalProperties": false
+      },
+      "Status": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "writePaused": {
+            "type": "boolean"
+          },
+          "ownerWritePaused": {
+            "type": "boolean"
+          },
+          "writerReady": {
+            "type": "boolean"
+          },
+          "lastScanAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastBackupAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeMode": {
+            "type": "boolean"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accounts": {
+            "type": "object",
+            "properties": {
+              "staged": {
+                "type": "integer"
+              },
+              "active": {
+                "type": "integer"
+              },
+              "offboarding": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "staged",
+              "active",
+              "offboarding"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "capabilities",
+          "writePaused",
+          "ownerWritePaused",
+          "writerReady",
+          "lastScanAt",
+          "lastBackupAt",
+          "safeMode",
+          "version",
+          "accounts"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "paths": {
+    "/me": {
+      "get": {
+        "operationId": "get__me",
+        "summary": "Instance, owner, API key scopes and supported capabilities",
+        "parameters": [],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "get__openapi_json",
+        "summary": "Download this OpenAPI document",
+        "parameters": [],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "operationId": "get__status",
+        "summary": "Sync and application backup status",
+        "parameters": [],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts": {
+      "get": {
+        "operationId": "get__accounts",
+        "summary": "List managed accounts without passwords or addon URLs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "all",
+                "expired"
+              ],
+              "default": "all"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Account"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "accounts",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__accounts",
+        "summary": "Stage an existing Stremio login; does not register a Stremio account or activate sync",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: create. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccount"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}": {
+      "get": {
+        "operationId": "get__accounts__id_",
+        "summary": "Read account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/execution": {
+      "get": {
+        "operationId": "get__accounts__id__execution",
+        "summary": "Read current account and latest job, or a removal tombstone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Execution"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/credentials": {
+      "get": {
+        "operationId": "get__accounts__id__credentials",
+        "summary": "Retrieve saved device login without rotation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "credentials:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accountId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "password": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "accountId",
+                    "email",
+                    "password"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/addons": {
+      "get": {
+        "operationId": "get__accounts__id__addons",
+        "summary": "Read saved addon configuration; URLs may contain secrets",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "configuration:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__accounts__id__addons",
+        "summary": "Save individual addon configuration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: addons. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write",
+          "configuration:read"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountAddons"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account-references/{ref}": {
+      "get": {
+        "operationId": "get__account_references__ref_",
+        "summary": "Exact external-reference lookup, including removed-account reservations",
+        "parameters": [
+          {
+            "name": "ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account-references": {
+      "post": {
+        "operationId": "post__account_references",
+        "summary": "Explicitly link an existing account to an external reference",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: link. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkAccount"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/name": {
+      "post": {
+        "operationId": "post__accounts__id__name",
+        "summary": "Rename account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: name. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "expectedVersion",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/membership": {
+      "post": {
+        "operationId": "post__accounts__id__membership",
+        "summary": "Set dated or lifetime membership; a past cutoff expires the account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: membership. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Membership"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/bulk-membership": {
+      "post": {
+        "operationId": "post__accounts_bulk_membership",
+        "summary": "Set membership for a versioned account selection",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: bulk-membership. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkMembership"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/assign-group": {
+      "post": {
+        "operationId": "post__accounts_assign_group",
+        "summary": "Assign or detach selected accounts",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: assign-group. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Assignment"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/sync": {
+      "post": {
+        "operationId": "post__accounts__id__sync",
+        "summary": "Queue sync for an activated account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: sync. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "sync:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Version"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/bulk-sync": {
+      "post": {
+        "operationId": "post__accounts_bulk_sync",
+        "summary": "Queue sync for selected activated accounts",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: bulk-sync. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "sync:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accounts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "expectedVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "expectedVersion"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  }
+                },
+                "required": [
+                  "accounts"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/activation-preview": {
+      "post": {
+        "operationId": "post__accounts__id__activation_preview",
+        "summary": "Read-only first-sync review against Stremio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "sync:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivationPreview"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirstSyncReview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/activate": {
+      "post": {
+        "operationId": "post__accounts__id__activate",
+        "summary": "Accept first-sync review and queue activation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: activate. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "sync:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Activation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/reconnect": {
+      "post": {
+        "operationId": "post__accounts__id__reconnect",
+        "summary": "Verify and save a replacement password for the same provider identity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: reconnect. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:write",
+          "sync:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "writeOnly": true
+                  }
+                },
+                "required": [
+                  "expectedVersion",
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/offboard": {
+      "post": {
+        "operationId": "post__accounts__id__offboard",
+        "summary": "Clear provider addons, verify, then remove the local account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: offboard. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "accounts:remove"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Version"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/groups": {
+      "get": {
+        "operationId": "get__groups",
+        "summary": "List group summaries",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GroupSummary"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "groups",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__groups",
+        "summary": "Create group draft",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: create-group. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "groups:write",
+          "configuration:read"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Group"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/groups/{id}": {
+      "get": {
+        "operationId": "get__groups__id_",
+        "summary": "Read complete group draft and published configuration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "configuration:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupRecord"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/groups/{id}/deployment": {
+      "get": {
+        "operationId": "get__groups__id__deployment",
+        "summary": "Read rollout progress for a group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deployment": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Deployment"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "deployment"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/groups/{id}/publish": {
+      "post": {
+        "operationId": "post__groups__id__publish",
+        "summary": "Validate and publish edits, then queue eligible members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
+            "description": "Durable receipt action: publish-group. Same key and intent replays; different content returns 409."
+          }
+        ],
+        "x-required-scopes": [
+          "read",
+          "groups:write",
+          "configuration:read"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPublication"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/{id}": {
+      "get": {
+        "operationId": "get__operations__id_",
+        "summary": "Read a durable provider job, including offboarding history",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/receipts/{action}/{key}": {
+      "get": {
+        "operationId": "get__receipts__action___key_",
+        "summary": "Recover a committed response; requires the original action scopes",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "create",
+                "link",
+                "name",
+                "membership",
+                "bulk-membership",
+                "assign-group",
+                "addons",
+                "sync",
+                "bulk-sync",
+                "activate",
+                "reconnect",
+                "offboard",
+                "create-group",
+                "publish-group"
+              ]
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-required-scopes": [
+          "read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved or read successfully. A non-null jobId means provider work must be polled; this is not proof of sync completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Sanitized error; 401 invalid/expired/revoked key, 403 missing scope, 409 conflicting state/request, 429 rate limit. An interrupted or 5xx mutation has an uncertain outcome: recover its receipt or retry the same key.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
