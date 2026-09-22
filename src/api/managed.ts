@@ -356,6 +356,10 @@ export type ManagedGroupChanges = ManagedGroupDraft & {
 export type MembershipChange =
   | { mode: 'lifetime'; expectedVersion: number }
   | { mode: 'term'; expectedVersion: number; local: string; offset?: number; timezone?: string }
+export type BulkMembership =
+  | { mode: 'lifetime' }
+  | { mode: 'term'; local: string; offset?: number; timezone?: string }
+export type GroupMemberSelection = { id: string; expectedVersion: number }[]
 
 const errorMessages = {
   UNAUTHORIZED: 'Your manager session could not be verified. Sign in again.',
@@ -651,12 +655,35 @@ export function createManagedApi({
     assignGroup: (
       body: {
         groupId: string | null
+        sourceGroupId?: string
         useGroupAddons?: boolean
         accounts: { id: string; expectedVersion: number }[]
       },
       key: string,
       signal?: AbortSignal
     ) => request('/accounts/assign-group', assignmentResultSchema, { body, key, signal }),
+    setGroupMembership: (
+      id: string,
+      body: { accounts: GroupMemberSelection; membership: BulkMembership },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/groups/${encodeURIComponent(id)}/members/membership`, assignmentResultSchema, {
+        body,
+        key,
+        signal,
+      }),
+    requestGroupSync: (
+      id: string,
+      body: { accounts: GroupMemberSelection },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/groups/${encodeURIComponent(id)}/members/sync`, assignmentResultSchema, {
+        body,
+        key,
+        signal,
+      }),
     resolveManifest: (url: string, signal?: AbortSignal) =>
       request('/manifests/resolve', manifestResultSchema, { body: { url }, signal }),
     previewGroupPublication: (id: string, expectedVersion: number, signal?: AbortSignal) =>

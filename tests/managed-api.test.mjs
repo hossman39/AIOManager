@@ -23,7 +23,7 @@ const importRequest = (extra = {}) => ({
   ...extra,
 })
 
-async function fixture(t, manifestOptions = {}) {
+async function fixture(t, manifestOptions = {}, env = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'aiomanager-managed-test-'))
   const apps = []
   let networkCalls = 0
@@ -44,7 +44,7 @@ async function fixture(t, manifestOptions = {}) {
   const start = async (encryptionKey = syntheticKey) => {
     const db = new DB({ env: {}, sqlitePath: path.join(directory, 'aio.db') })
     const app = await buildServer({
-      env: {},
+      env,
       database: db,
       dataDir: directory,
       encryptionKey,
@@ -104,6 +104,12 @@ test('every managed API requires server-verified owner credentials', async (t) =
       },
       { method: 'POST', url: `/api/managed/groups/${randomUUID()}/publish`, payload: {} },
       { method: 'POST', url: `/api/managed/groups/${randomUUID()}/publish-changes`, payload: {} },
+      {
+        method: 'POST',
+        url: `/api/managed/groups/${randomUUID()}/members/membership`,
+        payload: {},
+      },
+      { method: 'POST', url: `/api/managed/groups/${randomUUID()}/members/sync`, payload: {} },
       { method: 'GET', url: `/api/managed/deployments/${randomUUID()}` },
       { method: 'GET', url: `/api/managed/groups/${randomUUID()}/deployment` },
       { method: 'POST', url: '/api/managed/accounts/assign-group', payload: {} },
@@ -490,6 +496,47 @@ const fakeManifestResponse = () => ({
   status: 200,
   headers: {},
   body: Buffer.from(JSON.stringify(enabledFixtureAddon().manifest)),
+})
+
+test('group member bulk HTTP updates membership and queues sync without activating other members', async (t) => {
+  const { app, db, networkCalls } = await fixture(t, {}, { MANAGED_WRITES_ENABLED: 'true' })
+  const imported = (await app.inject(importRequest())).json().accounts
+  const group = (await app.inject(managedPost('/groups', { name: 'Bulk HTTP group' }))).json().group
+  const assigned = (
+    await app.inject(
+      managedPost('/accounts/assign-group', {
+        groupId: group.id,
+        accounts: imported.map(({ id }) => ({ id, expectedVersion: 1 })),
+      })
+    )
+  ).json().accounts
+  const payload = {
+    accounts: assigned.map(({ account }) => ({ id: account.id, expectedVersion: account.version })),
+    membership: { mode: 'term', local: '2027-01-01T12:00', timezone: 'Europe/London' },
+  }
+  const request = managedPost(`/groups/${group.id}/members/membership`, payload)
+  const result = await app.inject(request)
+  assert.equal(result.statusCode, 200, result.body)
+  assert.equal(result.headers['cache-control'], 'no-store')
+  const member = result.json().accounts[0].account
+  assert.equal(member.expiry.timezone, 'Europe/London')
+  assert.equal(member.state, 'staged')
+  assert.equal(result.json().accounts[0].jobId, null)
+  assert.equal((await app.inject(request)).json().replayed, true)
+  const sync = managedPost(`/groups/${group.id}/members/sync`, {
+    accounts: [{ id: member.id, expectedVersion: member.version }],
+  })
+  assert.equal((await app.inject(sync)).json().error.code, 'INVALID_STATE')
+  await db.run(
+    "UPDATE managed_accounts SET state = 'active', provider_key = 'synthetic-bulk-http', provider_enc = 'synthetic' WHERE id = $1",
+    [member.id]
+  )
+  const queued = await app.inject(sync)
+  assert.equal(queued.statusCode, 200, queued.body)
+  assert.ok(queued.json().accounts[0].jobId)
+  assert.equal((await app.inject(sync)).json().replayed, true)
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM managed_jobs')).count, 1)
+  assert.equal(networkCalls(), 0)
 })
 
 test('manifest resolve HTTP is authenticated, read-only, bounded and redacts failures', async (t) => {

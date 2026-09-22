@@ -493,6 +493,48 @@ test('ambiguous publication delivery does not retry automatically and exact retr
   assert.deepEqual(calls[0].body, payload)
 })
 
+test('bulk member client sends the selected versions, timezone, and source group with stable retry keys', async () => {
+  const calls: { url: string; key: string | null; body: unknown }[] = []
+  const api = createManagedApi({
+    ...auth,
+    fetch: async (url, options) => {
+      assert.equal(options?.method, 'POST')
+      calls.push({
+        url: String(url),
+        key: new Headers(options?.headers).get('idempotency-key'),
+        body: JSON.parse(String(options?.body)),
+      })
+      if (calls.length === 1) throw new Error('Synthetic lost bulk response')
+      return reply({ accounts: [{ account: publicAccount, jobId: null }], replayed: true })
+    },
+  })
+  const accounts = [{ id: publicAccount.id, expectedVersion: publicAccount.version }]
+  const body = {
+    accounts,
+    membership: {
+      mode: 'term' as const,
+      local: '2027-11-07T01:30',
+      timezone: 'America/New_York',
+      offset: -300,
+    },
+  }
+  const key = 'synthetic-bulk-membership-key'
+  await assert.rejects(api.setGroupMembership(groupId, body, key), { code: 'NETWORK_ERROR' })
+  assert.equal(calls.length, 1)
+  assert.equal((await api.setGroupMembership(groupId, body, key)).replayed, true)
+  assert.deepEqual(calls[0], calls[1])
+  assert.deepEqual(calls[0], {
+    url: `/api/managed/groups/${groupId}/members/membership`,
+    key,
+    body,
+  })
+  await api.requestGroupSync(groupId, { accounts }, key)
+  assert.equal(calls[2].url, `/api/managed/groups/${groupId}/members/sync`)
+  const move = { sourceGroupId: groupId, groupId: null, useGroupAddons: true, accounts }
+  await api.assignGroup(move, key)
+  assert.deepEqual(calls[3].body, move)
+})
+
 test('one-call group publishing sends all edits together and preserves them on exact retry', async () => {
   const calls: { key: string | null; body: unknown }[] = []
   const api = createManagedApi({

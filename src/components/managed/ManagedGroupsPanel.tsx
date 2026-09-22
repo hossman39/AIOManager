@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   ManagedApiError,
   type createManagedApi,
@@ -32,7 +33,6 @@ function GroupEditor({
   group,
   api,
   onSaved,
-  onClose,
   onLock,
   externalBusy,
   onDeleted,
@@ -40,7 +40,6 @@ function GroupEditor({
   group: ManagedGroup
   api: Api
   onSaved: (result: EditorResult) => void
-  onClose: () => void
   onLock: (locked: boolean) => void
   externalBusy: boolean
   onDeleted: (count: number) => void
@@ -263,14 +262,6 @@ function GroupEditor({
         >
           {dirty || pendingUrl ? 'Discard edits & reload saved group' : 'Reload saved group'}
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={dirty || pendingUrl || locked}
-          onClick={onClose}
-        >
-          Close editor
-        </Button>
       </div>
       {dirty && (
         <p role="status" className="text-sm">
@@ -373,6 +364,7 @@ export function ManagedGroupsPanel({
   const [groups, setGroups] = useState<ManagedGroupSummary[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [selected, setSelected] = useState<ManagedGroup | null>(null)
+  const [tab, setTab] = useState('addons')
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(false)
   const [editorLocked, setEditorLocked] = useState(false)
@@ -449,7 +441,11 @@ export function ManagedGroupsPanel({
     setNotice('')
     try {
       const group = await api.group(id, controller.signal)
-      if (alive.current && token === sequence.current) setSelected(group)
+      if (alive.current && token === sequence.current) {
+        setSelected(group)
+        setTab('addons')
+        setCreating(false)
+      }
     } catch (error) {
       if (alive.current && token === sequence.current) setError(describe(error))
     } finally {
@@ -519,9 +515,9 @@ export function ManagedGroupsPanel({
           type="button"
           variant="outline"
           disabled={loading || selectionLocked}
-          onClick={() => void load()}
+          onClick={() => (selected ? setSelected(null) : void load())}
         >
-          Refresh groups
+          {selected ? 'All groups' : 'Refresh groups'}
         </Button>
       </div>
       {error && (
@@ -536,7 +532,14 @@ export function ManagedGroupsPanel({
       )}
       {!selected && !creating && <Button onClick={() => setCreating(true)}>New group</Button>}
       {!selected && creating && (
-        <NewGroup api={api} onCreated={(group) => saved({ group })} onLock={setEditorLocked} />
+        <NewGroup
+          api={api}
+          onCreated={(group) => {
+            setTab('addons')
+            saved({ group })
+          }}
+          onLock={setEditorLocked}
+        />
       )}
       {!selected && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-busy={loading}>
@@ -571,84 +574,104 @@ export function ManagedGroupsPanel({
         </Button>
       )}
       {selected && (
-        <ManagedGroupMembers
-          key={selected.id}
-          group={selected}
-          groups={groups}
-          api={api}
-          disabled={loading || editorLocked}
-          onLock={setMembersLocked}
-          onChanged={onAccountsChanged}
-        />
-      )}
-      {selected && (
-        <GroupEditor
-          key={`${selected.id}:${selected.version}`}
-          group={selected}
-          api={api}
-          onSaved={saved}
-          onClose={() => setSelected(null)}
-          onLock={setEditorLocked}
-          externalBusy={loading || membersLocked}
-          onDeleted={(count) => {
-            cancelReads()
-            setGroups((previous) => previous.filter((group) => group.id !== selected.id))
-            setSelected(null)
-            setNotice(
-              `Group deleted. ${count} account${count === 1 ? '' : 's'} kept with individual addon setups.`
-            )
-            onAccountsChanged()
-            void load()
+        <Tabs
+          value={tab}
+          onValueChange={(value) => {
+            if (!selectionLocked && !loading) setTab(value)
           }}
-        />
-      )}
-      {selected && (
-        <div
-          className="space-y-3 rounded-lg border p-3 text-sm"
-          aria-labelledby="managed-rollout-heading"
+          className="min-w-0 space-y-4"
         >
-          <h4 id="managed-rollout-heading" className="font-medium">
-            Recorded rollout status — {selected.name}
-            {shownDeployment ? ` · revision ${shownDeployment.revision}` : ''}
-          </h4>
-          <p>
-            Pending jobs wait for managed sync to be enabled and resumed. Verified means the server
-            read back the expected addon setup from Stremio.
-          </p>
-          {progressPending && <p role="status">Reading recorded rollout…</p>}
-          {!progressPending && !progressError && !shownDeployment && (
-            <p>No published rollout recorded.</p>
-          )}
-          {shownDeployment && (
-            <>
-              <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {Object.entries(shownDeployment.counts).map(([state, count]) => (
-                  <div key={state}>
-                    <dt className="capitalize text-muted-foreground">{state}</dt>
-                    <dd className="text-lg font-medium">{count}</dd>
-                  </div>
-                ))}
-              </dl>
+          <TabsList aria-label="Group management">
+            <TabsTrigger value="addons" disabled={selectionLocked || loading}>
+              Addons
+            </TabsTrigger>
+            <TabsTrigger value="members" disabled={selectionLocked || loading}>
+              Members
+            </TabsTrigger>
+            <TabsTrigger value="status" disabled={selectionLocked || loading}>
+              Sync status
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="members">
+            <ManagedGroupMembers
+              key={selected.id}
+              group={selected}
+              groups={groups}
+              api={api}
+              disabled={loading || editorLocked}
+              onLock={setMembersLocked}
+              onChanged={onAccountsChanged}
+            />
+          </TabsContent>
+          <TabsContent value="addons">
+            <GroupEditor
+              key={`${selected.id}:${selected.version}`}
+              group={selected}
+              api={api}
+              onSaved={saved}
+              onLock={setEditorLocked}
+              externalBusy={loading || membersLocked}
+              onDeleted={(count) => {
+                cancelReads()
+                setGroups((previous) => previous.filter((group) => group.id !== selected.id))
+                setSelected(null)
+                setNotice(
+                  `Group deleted. ${count} account${count === 1 ? '' : 's'} kept with individual addon setups.`
+                )
+                onAccountsChanged()
+                void load()
+              }}
+            />
+          </TabsContent>
+          <TabsContent value="status">
+            <div
+              className="space-y-3 rounded-lg border p-3 text-sm"
+              aria-labelledby="managed-rollout-heading"
+            >
+              <h4 id="managed-rollout-heading" className="font-medium">
+                Recorded rollout status — {selected.name}
+                {shownDeployment ? ` · revision ${shownDeployment.revision}` : ''}
+              </h4>
               <p>
-                {shownDeployment.skipped.staged} staged and {shownDeployment.skipped.offboarding}{' '}
-                offboarding accounts skipped.
+                Pending jobs wait for managed sync to be enabled and resumed. Verified means the
+                server read back the expected addon setup from Stremio.
               </p>
-            </>
-          )}
-          {!progressPending && progressError && (
-            <p role="alert" className="text-destructive">
-              {progressError}
-            </p>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={progressPending}
-            onClick={() => void progress(selected.id)}
-          >
-            Refresh recorded status
-          </Button>
-        </div>
+              {progressPending && <p role="status">Reading recorded rollout…</p>}
+              {!progressPending && !progressError && !shownDeployment && (
+                <p>No published rollout recorded.</p>
+              )}
+              {shownDeployment && (
+                <>
+                  <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {Object.entries(shownDeployment.counts).map(([state, count]) => (
+                      <div key={state}>
+                        <dt className="capitalize text-muted-foreground">{state}</dt>
+                        <dd className="text-lg font-medium">{count}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p>
+                    {shownDeployment.skipped.staged} staged and{' '}
+                    {shownDeployment.skipped.offboarding} offboarding accounts skipped.
+                  </p>
+                </>
+              )}
+              {!progressPending && progressError && (
+                <p role="alert" className="text-destructive">
+                  {progressError}
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={progressPending}
+                onClick={() => void progress(selected.id)}
+              >
+                Refresh recorded status
+              </Button>
+            </div>
+          </TabsContent>
+        </Tabs>
       )}
     </section>
   )

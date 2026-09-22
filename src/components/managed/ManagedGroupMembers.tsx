@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+﻿import { useCallback, useEffect, useRef, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ManagedApiError,
@@ -9,7 +9,9 @@ import {
   type ManagedGroupSummary,
 } from '@/api/managed'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
-import { accountStatus } from './account-labels'
+import { GroupMemberList } from './GroupMemberList'
+import { GroupMemberDialog } from './GroupMemberDialog'
+import { GroupBulkUpdate } from './GroupBulkUpdate'
 
 type Api = ReturnType<typeof createManagedApi>
 
@@ -31,8 +33,9 @@ export function ManagedGroupMembers({
   const [accounts, setAccounts] = useState<ManagedAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [picking, setPicking] = useState(false)
-  const [search, setSearch] = useState('')
+  const [bulk, setBulk] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [addSelected, setAddSelected] = useState<Set<string>>(new Set())
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const controller = useRef<AbortController | null>(null)
@@ -51,8 +54,17 @@ export function ManagedGroupMembers({
         after = page.nextCursor ?? ''
       } while (after && !abort.signal.aborted)
       if (!abort.signal.aborted) {
-        setAccounts([...inventory.values()])
+        setAccounts(
+          [...inventory.values()].sort(
+            (a, b) =>
+              (a.name || a.email).localeCompare(b.name || b.email, undefined, {
+                sensitivity: 'base',
+                numeric: true,
+              }) || a.id.localeCompare(b.id)
+          )
+        )
         setSelected(new Set())
+        setAddSelected(new Set())
       }
     } catch (error) {
       if (!abort.signal.aborted)
@@ -65,55 +77,65 @@ export function ManagedGroupMembers({
     void load()
     return () => controller.current?.abort()
   }, [load, group.version])
+  const updated = (message: string) => {
+    setNotice(message)
+    setSelected(new Set())
+    setAddSelected(new Set())
+    setPicking(false)
+    setBulk(false)
+    onChanged()
+    void load()
+  }
   const mutation = useManagedSubmission<
     Parameters<Api['assignGroup']>[0],
     Awaited<ReturnType<Api['assignGroup']>>
   >(
     (body, key, signal) => api.assignGroup(body, key, signal),
-    (result) => {
-      const count = result.accounts.length
-      setNotice(`${count} account${count === 1 ? '' : 's'} added to ${group.name}.`)
-      setSelected(new Set())
-      setPicking(false)
-      setSearch('')
-      onChanged()
-      // Refresh after retries too: an acknowledgement can describe an older operation.
-      void load()
-    }
+    (result) =>
+      updated(
+        `${result.accounts.length} account${result.accounts.length === 1 ? '' : 's'} added to ${group.name}.`
+      )
   )
   const submitting = mutation.busy || mutation.uncertain
   const locked = disabled || loading || submitting || mutation.stale
-  useUnsavedWarning(selected.size > 0 || submitting)
+  useUnsavedWarning(selected.size > 0 || addSelected.size > 0 || submitting)
   useEffect(() => {
-    onLock(picking || loading || submitting)
+    onLock(picking || bulk || loading || submitting || selected.size > 0)
     return () => onLock(false)
-  }, [picking, loading, submitting, onLock])
-
+  }, [picking, bulk, loading, submitting, selected.size, onLock])
   const members = accounts.filter((account) => account.groupId === group.id)
   const candidates = accounts.filter(
     (account) => account.groupId !== group.id && account.state !== 'offboarding'
   )
-  const query = search.trim().toLocaleLowerCase()
-  const visible = candidates.filter((account) =>
-    `${account.name} ${account.email}`.toLocaleLowerCase().includes(query)
-  )
   const eligible = (account: ManagedAccount) =>
     account.state === 'staged' || group.publishedRevision !== null
-  const selection = candidates.filter((account) => selected.has(account.id) && eligible(account))
-
+  const toAdd = candidates.filter((account) => addSelected.has(account.id) && eligible(account))
+  const closePicker = () => {
+    if (submitting) return
+    setPicking(false)
+    setAddSelected(new Set())
+    mutation.reset()
+  }
   return (
-    <section
-      className="min-w-0 space-y-3 rounded-lg border p-4"
-      aria-labelledby="group-members-heading"
-    >
+    <section className="min-w-0 space-y-4" aria-labelledby="group-members-heading">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 id="group-members-heading" className="font-semibold">
           Members{!loading && !error ? ` (${members.length})` : ''}
         </h4>
-        {!picking && (
+        <div className="flex gap-2">
           <Button
             type="button"
-            disabled={locked || Boolean(error)}
+            variant="outline"
+            size="icon"
+            aria-label="Refresh group members"
+            disabled={locked || selected.size > 0 || picking || bulk}
+            onClick={() => void load()}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button
+            type="button"
+            disabled={locked || Boolean(error) || selected.size > 0}
             onClick={() => {
               setPicking(true)
               setNotice('')
@@ -121,7 +143,7 @@ export function ManagedGroupMembers({
           >
             Add members
           </Button>
-        )}
+        </div>
       </div>
       {notice && (
         <p role="status" className="text-sm">
@@ -130,7 +152,7 @@ export function ManagedGroupMembers({
       )}
       {loading && (
         <p role="status" className="text-sm">
-          Loading accounts…
+          Loading members…
         </p>
       )}
       {error && (
@@ -138,177 +160,119 @@ export function ManagedGroupMembers({
           {error}
         </p>
       )}
-      {!loading &&
-        !error &&
-        !picking &&
-        (members.length ? (
-          <ul className="max-h-64 divide-y overflow-y-auto text-sm">
-            {members.map((account) => (
-              <li
-                key={account.id}
-                className="flex flex-wrap items-center justify-between gap-2 py-3"
+      {!loading && !error && (
+        <>
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+              <span>
+                {selected.size} member{selected.size === 1 ? '' : 's'} selected
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                disabled={locked || picking || bulk}
+                onClick={() => setBulk(true)}
               >
-                <div className="min-w-0 flex-1 break-words">
-                  <p className="font-medium">{account.name || account.email}</p>
-                  {account.name && account.name !== account.email && (
-                    <p className="text-muted-foreground">{account.email}</p>
-                  )}
-                  <p className="text-xs text-muted-foreground">{accountStatus(account)}</p>
-                </div>
-                {!disabled && (
-                  <Link
-                    className="shrink-0 text-primary hover:underline"
-                    to={`/account/${account.id}`}
-                  >
-                    Open account
-                  </Link>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No members yet. Add an existing account to use this group.
-          </p>
-        ))}
-      {picking && (
-        <div className="space-y-3 text-sm">
-          <p className="text-muted-foreground">
-            Select accounts to join this group. Accounts in another group will move here. Group
-            settings apply to shared addons; account-only addons stay. Accounts whose sync has not
-            started stay inactive.
-          </p>
-          {group.publishedRevision === null && (
-            <p>Publish this group before adding accounts that already have sync started.</p>
-          )}
-          <label className="block space-y-1" htmlFor="group-member-search">
-            <span>Search accounts</span>
-            <input
-              id="group-member-search"
-              className="w-full min-w-0 rounded-md border bg-background px-3 py-2"
-              placeholder="Name or email"
-              value={search}
-              disabled={locked}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-          {!loading && !error && (
-            <div className="max-h-72 space-y-1 overflow-y-auto" aria-label="Accounts to add">
-              {visible.map((account) => (
-                <label key={account.id} className="flex items-start gap-3 rounded border p-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={selected.has(account.id)}
-                    disabled={
-                      locked ||
-                      !eligible(account) ||
-                      (selected.size >= 200 && !selected.has(account.id))
-                    }
-                    onChange={(event) => {
-                      setSelected((previous) => {
-                        const next = new Set(previous)
-                        if (event.target.checked) next.add(account.id)
-                        else next.delete(account.id)
-                        return next
-                      })
-                    }}
-                  />
-                  <span className="min-w-0 break-words">
-                    <span className="block font-medium">{account.name || account.email}</span>
-                    {account.name && account.name !== account.email && (
-                      <span className="block">{account.email}</span>
-                    )}
-                    <span className="block text-xs text-muted-foreground">
-                      {account.groupId
-                        ? `Moving from ${groups.find((item) => item.id === account.groupId)?.name ?? 'another group'}`
-                        : 'Individual account'}
-                      {!eligible(account)
-                        ? ' · Publish the group first'
-                        : account.state === 'staged'
-                          ? ' · Sync not started'
-                          : ''}
-                    </span>
-                  </span>
-                </label>
-              ))}
-              {!visible.length && (
-                <p>
-                  {candidates.length
-                    ? 'No accounts match your search.'
-                    : 'All available accounts are already in this group.'}
-                </p>
-              )}
+                Bulk update
+              </Button>
             </div>
           )}
-          {selected.size > 0 && (
-            <p role="status">
-              {selected.size} selected{selected.size === 200 ? ' (maximum per batch)' : ''}
+          <GroupMemberList
+            accounts={members}
+            selected={selected}
+            onSelected={setSelected}
+            disabled={locked || picking || bulk}
+            isSelectable={(account) => account.state !== 'offboarding'}
+          />
+        </>
+      )}
+      {picking && (
+        <GroupMemberDialog
+          title={`Add members to ${group.name}`}
+          description="Select existing accounts. Accounts in another group will move here; account-only addons stay."
+          blocked={submitting}
+          onClose={closePicker}
+        >
+          {group.publishedRevision === null && (
+            <p className="text-sm">
+              Publish this group before adding accounts whose sync has started.
             </p>
           )}
+          <GroupMemberList
+            mode="add"
+            groups={groups}
+            accounts={candidates}
+            selected={addSelected}
+            onSelected={setAddSelected}
+            disabled={locked}
+            isSelectable={eligible}
+          />
           {mutation.message && (
-            <p role="alert" className="text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {mutation.message}
             </p>
           )}
           {mutation.uncertain && (
-            <p>
-              The selection is saved for retry. Confirm the same request without adding accounts
-              twice.
+            <p className="text-sm">
+              This request may already be saved. Retry to confirm the same selection.
             </p>
           )}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              disabled={locked || Boolean(error) || !selection.length}
-              onClick={() =>
-                void mutation.submit({
-                  groupId: group.id,
-                  useGroupAddons: true,
-                  accounts: selection.map((account) => ({
-                    id: account.id,
-                    expectedVersion: account.version,
-                  })),
-                })
-              }
-            >
-              {mutation.busy
-                ? 'Adding members…'
-                : `Add selected members${selection.length ? ` (${selection.length})` : ''}`}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="outline" disabled={submitting} onClick={closePicker}>
+              Cancel
             </Button>
-            {mutation.uncertain && (
+            {mutation.stale && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  closePicker()
+                  void load()
+                }}
+              >
+                Reload accounts
+              </Button>
+            )}
+            {mutation.uncertain ? (
               <Button type="button" disabled={mutation.busy} onClick={() => void mutation.retry()}>
                 Retry adding members
               </Button>
+            ) : (
+              <Button
+                type="button"
+                disabled={locked || Boolean(error) || !toAdd.length}
+                onClick={() =>
+                  void mutation.submit({
+                    groupId: group.id,
+                    useGroupAddons: true,
+                    accounts: toAdd.map((account) => ({
+                      id: account.id,
+                      expectedVersion: account.version,
+                    })),
+                  })
+                }
+              >
+                {mutation.busy
+                  ? 'Adding…'
+                  : `Add selected members${toAdd.length ? ` (${toAdd.length})` : ''}`}
+              </Button>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              disabled={submitting}
-              onClick={() => {
-                setPicking(false)
-                setSelected(new Set())
-                setSearch('')
-                mutation.reset()
-              }}
-            >
-              Cancel
-            </Button>
           </div>
-        </div>
+        </GroupMemberDialog>
       )}
-      {(error || mutation.stale) && (
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled || loading || submitting}
-          onClick={() => {
-            mutation.reset()
+      {bulk && (
+        <GroupBulkUpdate
+          api={api}
+          group={group}
+          accounts={members.filter((account) => selected.has(account.id))}
+          onClose={() => setBulk(false)}
+          onSaved={updated}
+          onReload={() => {
+            setBulk(false)
+            setSelected(new Set())
             void load()
           }}
-        >
-          Reload accounts
-        </Button>
+        />
       )}
     </section>
   )

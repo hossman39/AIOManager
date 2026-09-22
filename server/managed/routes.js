@@ -144,6 +144,22 @@ export async function registerManagedRoutes(app, repository, manifestService) {
       routes.get('/groups/:id', (request) =>
         repository.getGroup(request.managedAuth, request.params.id)
       )
+      routes.post('/groups/:id/members/membership', { bodyLimit: 32 * 1024 }, (request) =>
+        repository.setGroupMembership(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
+      routes.post('/groups/:id/members/sync', { bodyLimit: 32 * 1024 }, (request) =>
+        repository.requestGroupSync(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
+      )
       routes.get('/expiry-notice', (request) => repository.getExpiryNotice(request.managedAuth))
       routes.post('/expiry-notice', { bodyLimit: 8192 }, (request) =>
         repository.saveExpiryNotice(

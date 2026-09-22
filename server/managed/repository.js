@@ -11,6 +11,7 @@ import { createManagedGroupRepository } from './groups.js'
 import { createManagedOperations } from './operations.js'
 import { createManagedConnections } from './connections.js'
 import { createAccountAddonRepository } from './account-addons.js'
+import { lockGroupMembers, memberSelectionSchema } from './group-members.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
@@ -23,6 +24,13 @@ const membershipSchema = z.discriminatedUnion('mode', [
     timezone: z.string().max(100).optional(),
   }),
 ])
+const bulkMembershipSchema = z.strictObject({
+  accounts: memberSelectionSchema,
+  membership: z.discriminatedUnion(
+    'mode',
+    membershipSchema.options.map((option) => option.omit({ expectedVersion: true }))
+  ),
+})
 
 export function parseImportBody(body) {
   return parseCredentialImport(JSON.stringify(body))
@@ -78,6 +86,82 @@ export function createManagedRepository({
       [owner, scope, requestKey, digest, crypto.seal(result, responseContext), timestamp]
     )
     return result
+  }
+
+  async function setMembershipInTransaction(tx, owner, change, timestamp) {
+    const { id, expiry } = change
+    const account = await tx.get(
+      `SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
+      [owner, id]
+    )
+    if (!account) throw new ManagedError('NOT_FOUND')
+    if (account.record_version !== change.expectedVersion)
+      throw new ManagedError('VERSION_CONFLICT')
+    if (account.state === 'offboarding') throw new ManagedError('INVALID_STATE')
+    const lifetime = change.mode === 'lifetime' ? 1 : 0
+    const suspendedAt = lifetime === 1 || expiry.at > timestamp ? null : account.suspended_at
+    if (
+      account.lifetime === lifetime &&
+      account.expiry_at === (expiry?.at ?? null) &&
+      (!expiry ||
+        (account.expiry_local === expiry.local &&
+          (account.expiry_zone ?? MEMBERSHIP_TIMEZONE) === expiry.timezone)) &&
+      account.suspended_at === suspendedAt
+    )
+      return { account: publicAccount(account), jobId: null, replayed: false }
+    const result = await tx.run(
+      `UPDATE managed_accounts SET lifetime = $1, expiry_at = $2, expiry_local = $3,
+      expiry_offset = $4, expiry_timezone = $5, record_version = record_version + 1, policy_version = policy_version + 1,
+      updated_at = $6, suspended_at = $10, expiry_zone = $11, expiry_zone_offset = $12
+      WHERE owner_id = $7 AND id = $8 AND record_version = $9`,
+      [
+        lifetime,
+        expiry?.at ?? null,
+        expiry?.local ?? null,
+        expiry ? Math.trunc(expiry.offset) : null,
+        expiry ? MEMBERSHIP_TIMEZONE : null, // Legacy constraint; expiry_zone is authoritative since migration 4.
+        timestamp,
+        owner,
+        id,
+        change.expectedVersion,
+        suspendedAt,
+        expiry?.timezone ?? account.expiry_zone ?? MEMBERSHIP_TIMEZONE,
+        expiry ? Math.round(expiry.offset * 60) : null,
+      ]
+    )
+    if (result.changes !== 1) throw new ManagedError('VERSION_CONFLICT')
+    const updated = await tx.get('SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2', [
+      owner,
+      id,
+    ])
+    let jobId = null
+    if (updated.state === 'active') {
+      const target = currentAccountTarget(updated, timestamp)
+      const cause =
+        target === 'suspended'
+          ? 'expiry'
+          : currentAccountTarget(account, timestamp) === 'suspended'
+            ? 'renewal'
+            : 'manual'
+      const job = await jobs.enqueueInTransaction(tx, updated, cause, timestamp)
+      jobId = job.id
+    }
+    const eventId = randomUUID()
+    await tx.run(
+      'INSERT INTO managed_audit (id, owner_id, event_type, subject_id, detail_enc, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        eventId,
+        owner,
+        'membership.changed',
+        id,
+        crypto.seal(
+          { mode: change.mode, expiry, version: updated.record_version, jobId },
+          context(owner, eventId, 'audit')
+        ),
+        timestamp,
+      ]
+    )
+    return { account: publicAccount(updated), jobId, replayed: false }
   }
 
   async function inspectCandidates(connection, owner, parsed) {
@@ -191,6 +275,50 @@ export function createManagedRepository({
       validateManifests,
     }),
     authorize,
+    async setGroupMembership(auth, groupId, input, key) {
+      const parsed = bulkMembershipSchema.safeParse(input)
+      if (!parsed.success) throw new ManagedError('INVALID_INPUT')
+      const value = parsed.data
+      value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      let expiry = null
+      if (value.membership.mode === 'term') {
+        const resolved = resolveExpiry(
+          value.membership.local,
+          value.membership.offset,
+          value.membership.timezone
+        )
+        if (!resolved.ok) throw new ManagedError(resolved.code)
+        expiry = resolved.expiry
+      }
+      return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
+        idempotent(
+          tx,
+          owner,
+          'groups.membership',
+          key,
+          { groupId, ...value },
+          timestamp,
+          async () => {
+            await lockGroupMembers(tx, owner, groupId, value.accounts)
+            const accounts = []
+            for (const expected of value.accounts) {
+              const result = await setMembershipInTransaction(
+                tx,
+                owner,
+                {
+                  ...expected,
+                  mode: value.membership.mode,
+                  expiry,
+                },
+                timestamp
+              )
+              accounts.push({ account: result.account, jobId: result.jobId })
+            }
+            return { accounts, replayed: false }
+          }
+        )
+      )
+    },
     async setMembership(auth, id, input, requestKey) {
       const parsed = membershipSchema.safeParse(input)
       if (!parsed.success) throw new ManagedError('INVALID_INPUT')
@@ -209,78 +337,7 @@ export function createManagedRepository({
       }
       return ownerTransaction(auth, (tx, owner, _ownerRow, timestamp) =>
         idempotent(tx, owner, 'accounts.membership', requestKey, change, timestamp, async () => {
-          const account = await tx.get(
-            `SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
-            [owner, id]
-          )
-          if (!account) throw new ManagedError('NOT_FOUND')
-          if (account.record_version !== change.expectedVersion)
-            throw new ManagedError('VERSION_CONFLICT')
-          if (account.state === 'offboarding') throw new ManagedError('INVALID_STATE')
-          const lifetime = change.mode === 'lifetime' ? 1 : 0
-          const suspendedAt = lifetime === 1 || expiry.at > timestamp ? null : account.suspended_at
-          if (
-            account.lifetime === lifetime &&
-            account.expiry_at === (expiry?.at ?? null) &&
-            (!expiry ||
-              (account.expiry_local === expiry.local &&
-                (account.expiry_zone ?? MEMBERSHIP_TIMEZONE) === expiry.timezone)) &&
-            account.suspended_at === suspendedAt
-          )
-            return { account: publicAccount(account), jobId: null, replayed: false }
-          const result = await tx.run(
-            `UPDATE managed_accounts SET lifetime = $1, expiry_at = $2, expiry_local = $3,
-            expiry_offset = $4, expiry_timezone = $5, record_version = record_version + 1, policy_version = policy_version + 1,
-            updated_at = $6, suspended_at = $10, expiry_zone = $11, expiry_zone_offset = $12
-            WHERE owner_id = $7 AND id = $8 AND record_version = $9`,
-            [
-              lifetime,
-              expiry?.at ?? null,
-              expiry?.local ?? null,
-              expiry ? Math.trunc(expiry.offset) : null,
-              expiry ? MEMBERSHIP_TIMEZONE : null, // Legacy constraint; expiry_zone is authoritative since migration 4.
-              timestamp,
-              owner,
-              id,
-              change.expectedVersion,
-              suspendedAt,
-              expiry?.timezone ?? account.expiry_zone ?? MEMBERSHIP_TIMEZONE,
-              expiry ? Math.round(expiry.offset * 60) : null,
-            ]
-          )
-          if (result.changes !== 1) throw new ManagedError('VERSION_CONFLICT')
-          const updated = await tx.get(
-            'SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2',
-            [owner, id]
-          )
-          let jobId = null
-          if (updated.state === 'active') {
-            const target = currentAccountTarget(updated, timestamp)
-            const cause =
-              target === 'suspended'
-                ? 'expiry'
-                : currentAccountTarget(account, timestamp) === 'suspended'
-                  ? 'renewal'
-                  : 'manual'
-            const job = await jobs.enqueueInTransaction(tx, updated, cause, timestamp)
-            jobId = job.id
-          }
-          const eventId = randomUUID()
-          await tx.run(
-            'INSERT INTO managed_audit (id, owner_id, event_type, subject_id, detail_enc, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-            [
-              eventId,
-              owner,
-              'membership.changed',
-              id,
-              crypto.seal(
-                { mode: change.mode, expiry, version: updated.record_version, jobId },
-                context(owner, eventId, 'audit')
-              ),
-              timestamp,
-            ]
-          )
-          return { account: publicAccount(updated), jobId, replayed: false }
+          return setMembershipInTransaction(tx, owner, change, timestamp)
         })
       )
     },

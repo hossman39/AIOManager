@@ -12,6 +12,7 @@ import { createGroupPublicationRepository } from './publication.js'
 import { readAccountSetup } from './account-setup.js'
 import { projectManagedCollection } from './projection.js'
 import { emptyAccountOverrides } from '../../shared/account-addons.js'
+import { lockGroupMembers } from './group-members.js'
 
 const version = z.number().int().positive()
 const draftInput = z.strictObject({
@@ -29,6 +30,7 @@ const personalInput = z.strictObject({ expectedVersion: version, addons: z.unkno
 const deleteInput = z.strictObject({ expectedVersion: version })
 const assignmentInput = z.strictObject({
   groupId: z.uuid().nullable(),
+  sourceGroupId: z.uuid().optional(),
   useGroupAddons: z.boolean().optional(),
   accounts: z
     .array(z.strictObject({ id: z.uuid(), expectedVersion: version }))
@@ -413,6 +415,8 @@ export function createManagedGroupRepository({
       value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       return ownerTransaction(auth, (tx, owner, _ownerRow, timestamp) =>
         idempotent(tx, owner, 'accounts.assign-group', key, value, timestamp, async () => {
+          if (value.sourceGroupId)
+            await lockGroupMembers(tx, owner, value.sourceGroupId, value.accounts)
           const destination = value.groupId ? await group(tx, owner, value.groupId, true) : null
           if (destination?.archived) throw new ManagedError('INVALID_STATE')
           // Decode the shared configuration once, not once for every member.

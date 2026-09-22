@@ -1,10 +1,49 @@
 # Implementation progress
 
-Updated 2026-09-21. The managed runtime is now connected in an isolated testing
+Updated 2026-09-22. The managed runtime is now connected in an isolated testing
 candidate. No paying accounts, production database, or production deployment has
 been accessed or modified. Branch checkpoints/CI do not authorize production rollout.
 
 ## Current testing increment
+
+Open groups now separate **Addons**, **Members** and **Sync status** into tabs.
+Members use a compact list with name/email search, status filters and 10 rows per
+page. Checkboxes retain selection across pages and filters; **Select all matching**
+supports up to 200 selected accounts. **Add members** opens a separate, searchable
+and paged dialog instead of expanding the group screen. Account links remain
+available for individual management.
+
+**Bulk update** appears when members are selected. It supports a common dated or
+lifetime membership, moving to another group, keeping members as individual
+accounts, and syncing selected accounts whose first sync has started. Dated
+memberships default to `America/New_York` and accept other named timezones with
+explicit handling of clock changes. Expired accounts retain suspension rules;
+staged accounts are never activated by a bulk action. Removing group membership
+preserves the account's complete addon setup and membership.
+
+Bulk membership and sync requests validate all selected account versions, group
+membership and ownership before changes in one transaction. Assignment uses the
+same source-group check. Exact retries preserve the original request and do not
+repeat updates; stale selections require a reload. Individual membership and sync
+use the same transaction helpers as the new bulk operations.
+
+Local validation: 340 runnable tests pass, with 136 PostgreSQL contracts awaiting
+the hosted run. Typecheck, lint and build pass. New shared contracts cover timezone
+cutoffs, clock changes, concurrent retries, ownership, stale/moved members,
+offboarding, atomic rollback, staged accounts and expired sync targets.
+
+The isolated browser rehearsal loaded 128 synthetic accounts and a 105-member
+group. It checked selection across list pages and search queries, bulk expiry with
+an exact retry after a simulated lost response, moving/removing selected members,
+syncing an expired active member while skipping a staged member, and adding
+accounts selected across dialog pages. The member list and both dialogs fit a
+390px viewport; selecting all 103 remaining members kept only 10 rows rendered.
+No real provider requests were used in these tests.
+
+The user accepted one-click publishing in the previous build. The Android TV
+notice remains deferred until the live server has a reachable HTTPS address.
+
+## Earlier group-publishing checkpoint
 
 Groups now use a single **Publish changes** action. It validates the current edits,
 saves the name/addons/protection settings, records an immutable revision and queues

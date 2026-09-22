@@ -7,6 +7,7 @@ import { managedStorageContract, prepareManagedFixture } from './managed-contrac
 import { managedJobContract } from './managed-job-contract.mjs'
 import { managedMembershipContract } from './managed-membership-contract.mjs'
 import { managedGroupsContract } from './managed-groups-contract.mjs'
+import { managedGroupMembersContract } from './managed-group-members-contract.mjs'
 import { managedPublicationContract } from './managed-publication-contract.mjs'
 import { managedWorkerContract } from './managed-worker-contract.mjs'
 import { managedRuntimeContract } from './managed-runtime-contract.mjs'
@@ -62,6 +63,9 @@ managedMembershipContract('PostgreSQL membership', options, async (t, fixtureOpt
   prepareManagedFixture(await fixture(t), fixtureOptions)
 )
 managedGroupsContract('PostgreSQL group configuration', options, async (t) =>
+  prepareManagedFixture(await fixture(t))
+)
+managedGroupMembersContract('PostgreSQL group members', options, async (t) =>
   prepareManagedFixture(await fixture(t))
 )
 managedPublicationContract('PostgreSQL group publication', options, async (t) =>

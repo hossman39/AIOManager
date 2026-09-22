@@ -59,8 +59,18 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    order, names, catalogs and protected/default entries.
 5. On **Groups**, create a group, add addons, and click **Publish changes** once.
    This saves the edits and queues sync for existing members together. In the open
-   group, choose **Add members**, search/select existing accounts, then **Add
-   selected members**. Confirm they appear in the member list. Accounts moved
+   group, open the **Members** tab and choose **Add members**. Search/select existing
+   accounts in the dialog, then **Add selected members**. Confirm they appear in
+   the compact member list. Use search, status filters and Previous/Next to find
+   members; each page shows up to 10 rows. Selection carries across pages and
+   filters. **Select all matching** adds matching accounts, up to 200 selected.
+   Select member checkboxes and choose **Bulk update** to set a common expiry
+   date/time (with a selectable timezone), choose lifetime, move to another group,
+   remove from this group, or sync addons now. Removal keeps the accounts and their
+   complete setups. Bulk sync skips accounts whose first sync has not started;
+   expired accounts keep their expiry rules. Clear the selection to switch tabs.
+   **Addons** contains the group editor; **Sync status** shows publication progress.
+   Accounts moved
    from another group use the new group's shared addons and keep account-only
    addons. Accounts whose sync has not started remain inactive. You can also use
    the account's **Group** tab or **Assign group** on Accounts.

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { lockGroupMembers, memberSelectionSchema } from './group-members.js'
 import { z } from 'zod'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
@@ -109,6 +110,31 @@ export function createManagedOperations({
       ]
     )
   }
+  async function requestSyncInTransaction(tx, owner, id, value, offboard, timestamp) {
+    const row = await account(tx, owner, id, value.expectedVersion, true)
+    if (row.state === 'staged' || (offboard && row.state !== 'active'))
+      throw new ManagedError('INVALID_STATE')
+    await tx.run(
+      'UPDATE managed_accounts SET state = $1, record_version = record_version + 1, policy_version = policy_version + 1, updated_at = $2 WHERE id = $3',
+      [offboard ? 'offboarding' : row.state, timestamp, id]
+    )
+    const updated = await tx.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
+    const job = await jobs.enqueueInTransaction(
+      tx,
+      updated,
+      offboard ? 'offboard' : 'manual',
+      timestamp
+    )
+    await audit(
+      tx,
+      row,
+      offboard ? 'account.offboarding' : 'account.sync-requested',
+      { jobId: job.id },
+      timestamp
+    )
+    return { account: publicAccount(updated), jobId: job.id, replayed: false }
+  }
+
   const operations = {
     async reconnectAccount(auth, id, input, key) {
       const value = parse(versionInput.extend({ password: z.string().min(1).max(4096) }), input)
@@ -329,28 +355,40 @@ export function createManagedOperations({
           { id, ...value },
           timestamp,
           async () => {
-            const row = await account(tx, owner, id, value.expectedVersion, true)
-            if (row.state === 'staged' || (offboard && row.state !== 'active'))
+            return requestSyncInTransaction(tx, owner, id, value, offboard, timestamp)
+          }
+        )
+      )
+    },
+    async requestGroupSync(auth, groupId, input, key) {
+      requireRuntime()
+      const value = parse(z.strictObject({ accounts: memberSelectionSchema }), input)
+      value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
+        idempotent(
+          tx,
+          owner,
+          'groups.member-sync',
+          key,
+          { groupId, ...value },
+          timestamp,
+          async () => {
+            const members = await lockGroupMembers(tx, owner, groupId, value.accounts)
+            if (members.some((account) => account.state !== 'active'))
               throw new ManagedError('INVALID_STATE')
-            await tx.run(
-              'UPDATE managed_accounts SET state = $1, record_version = record_version + 1, policy_version = policy_version + 1, updated_at = $2 WHERE id = $3',
-              [offboard ? 'offboarding' : row.state, timestamp, id]
-            )
-            const updated = await tx.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
-            const job = await jobs.enqueueInTransaction(
-              tx,
-              updated,
-              offboard ? 'offboard' : 'manual',
-              timestamp
-            )
-            await audit(
-              tx,
-              row,
-              offboard ? 'account.offboarding' : 'account.sync-requested',
-              { jobId: job.id },
-              timestamp
-            )
-            return { account: publicAccount(updated), jobId: job.id, replayed: false }
+            const accounts = []
+            for (const expected of value.accounts) {
+              const result = await requestSyncInTransaction(
+                tx,
+                owner,
+                expected.id,
+                expected,
+                false,
+                timestamp
+              )
+              accounts.push({ account: result.account, jobId: result.jobId })
+            }
+            return { accounts, replayed: false }
           }
         )
       )
