@@ -5,7 +5,24 @@ with Android TV acceptance in the live environment and whole-server backups defe
 No paying accounts or production database have been modified during this increment.
 The deployment target/access is still needed; publishing an image is not a VPS deployment.
 
-## Release preparation: 2.0.0
+## Release 2.0.0
+
+[PR 1](https://github.com/hossman39/AIOManager/pull/1) is merged. The
+[published release](https://github.com/hossman39/AIOManager/releases/tag/v2.0.0)
+uses commit `67395d1716f3a6fa5e8dcceabfa64616c67bb1c5`. All verification and
+publication jobs passed in
+[run 35788835770](https://github.com/hossman39/AIOManager/actions/runs/35788835770):
+Windows/Linux foundation checks, 144 PostgreSQL cases, AMD64/ARM64 container
+smoke checks, and the release image build. The image includes provenance and SBOM.
+
+Deploy `ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c`.
+Version `2.0.0` and SHA tag `sha-67395d1716f3a6fa5e8dcceabfa64616c67bb1c5`
+resolve to that digest. Anonymous registry access and both platform manifests were
+verified; both images use the non-root `node` user and the expected health check.
+The VPS installation is **not complete**: its server/Portainer target, hostname
+and access have not been supplied. No production database or provider account was
+changed. Android TV live acceptance and whole-server backups remain deferred by
+the owner; the TV Box Manager desktop adapter remains a separate integration step.
 
 Accounts now offers expiring-in-7/30-days filters, expiry sorting and Needs attention
 for incomplete setup, failed/retrying jobs and delayed work. The current-policy job
@@ -29,8 +46,8 @@ Deployment/update references use the fork, image selection requires a tested SHA
 tag/digest, the footer shows version/build identity, and the README/deployment guide
 describe the managed workflow. The existing upstream author credits are retained.
 
-Local validation: 358 tests pass, 144 PostgreSQL cases await hosted CI; typecheck,
-lint and build pass. New coverage exercises key hashing/scopes/expiry/revocation,
+Local validation: 358 tests pass; the 144 PostgreSQL cases also pass in hosted CI.
+Typecheck, lint and build pass. New coverage exercises key hashing/scopes/expiry/revocation,
 cross-owner denial, exact/concurrent retries, token rotation, restart recovery,
 API-driven activation/expiry/renewal/removal, transaction rollback, rate limits,
 backup restoration, current-policy job visibility and expiry-window boundaries.
@@ -39,8 +56,8 @@ All provider traffic in those checks is synthetic.
 An isolated browser rehearsal confirms key creation and permissions, connection
 discovery and dated membership via the issued key, key revocation, the unsaved-key
 navigation guard, expiry filtering/sorting and Needs attention. Account and API
-screens fit a 390px viewport without horizontal overflow. Hosted and deployment
-evidence will be recorded separately after those actions complete.
+screens fit a 390px viewport without horizontal overflow. Publication evidence is
+recorded above; live deployment evidence remains pending the server target.
 
 ## Earlier account editing checkpoint
 
