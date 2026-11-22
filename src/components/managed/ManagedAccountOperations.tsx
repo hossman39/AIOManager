@@ -23,6 +23,8 @@ const failureText: Record<string, string> = {
   VERIFICATION_MISMATCH:
     'Stremio did not return the expected addon setup. No success has been recorded.',
   WRITE_PAUSED: 'Writes are paused. Resume managed sync when ready.',
+  MANAGED_ACCOUNT: 'This provider account is already managed or has been removed.',
+  NUVIO_PROFILE: 'The Nuvio profile must exist and manage its own addons.',
 }
 export function ManagedAccountOperations({
   api,
@@ -41,6 +43,7 @@ export function ManagedAccountOperations({
   onRemoved: () => void
   onClose: () => void
 }) {
+  const providerName = account.platform === 'nuvio' ? 'Nuvio' : 'Stremio'
   const [execution, setExecution] = useState<ManagedExecution | null>(null)
   const [preview, setPreview] = useState<ManagedActivationPreview | null>(null)
   const [safeMode, setSafeMode] = useState('inherit')
@@ -75,8 +78,8 @@ export function ManagedAccountOperations({
       if (passwordInput.current) passwordInput.current.value = ''
       setNotice(
         result.removedAt
-          ? 'Stremio cleanup verified. Local account removed.'
-          : result.account?.state === 'staged'
+          ? `${providerName} cleanup verified. Local account removed.`
+          : result.account?.state === 'staged' && !result.account.groupSyncRequested
             ? 'Login verified. Sync has not started for this account.'
             : 'Request saved. Waiting for verified sync.'
       )
@@ -181,18 +184,39 @@ export function ManagedAccountOperations({
           )}
           {job.errorCode && (
             <p>
-              {failureText[job.errorCode] ??
-                'Stremio could not confirm the change. The account and saved setup are retained.'}
+              {failureText[job.errorCode]?.replace('Stremio', providerName) ??
+                `${providerName} could not confirm the change. The account and saved setup are retained.`}
             </p>
           )}
           {job.state === 'retrying' && <p>Next attempt: {new Date(job.dueAt).toLocaleString()}</p>}
         </div>
       )}
-      {current.state === 'staged' ? (
+      {current.state === 'staged' && current.groupSyncRequested ? (
+        <div className="space-y-2 text-sm">
+          <p>
+            {current.membershipType === 'unset'
+              ? 'Set a membership to sync the group addons.'
+              : !job
+                ? 'Group sync will start when the group is published.'
+                : 'The server syncs the saved group automatically.'}
+          </p>
+          {job?.state === 'failed' && (
+            <Button
+              variant="outline"
+              disabled={locked || mutation.stale || !enabled}
+              onClick={() =>
+                void mutation.submit({ kind: 'sync', body: { expectedVersion: current.version } })
+              }
+            >
+              Retry group sync
+            </Button>
+          )}
+        </div>
+      ) : current.state === 'staged' ? (
         <div className="space-y-3">
           <p className="text-sm">
             Save this account’s addons (or choose a published group) and set a membership first.
-            Preview signs in to the existing Stremio account and reads its addons.
+            Preview signs in to the existing {providerName} account and reads its addons.
           </p>
           <label className="block space-y-1 text-sm">
             <span>Protection for this account</span>
@@ -296,8 +320,8 @@ export function ManagedAccountOperations({
               <summary className="cursor-pointer font-medium">Remove this account</summary>
               <p className="my-3">
                 Removal disables all remote addons. The local account and credentials are deleted
-                only after Stremio confirms the collection is empty. Failed cleanup stays visible
-                here.
+                only after {providerName} confirms the collection is empty. Failed cleanup stays
+                visible here.
               </p>
               <label className="mb-3 flex items-start gap-2">
                 <input
@@ -327,8 +351,9 @@ export function ManagedAccountOperations({
       <details className="rounded border p-3 text-sm">
         <summary className="cursor-pointer font-medium">Repair saved login</summary>
         <p className="my-3">
-          Verify a password for {account.email}. The server saves it encrypted only after Stremio
-          confirms the login. Managed accounts must keep the same Stremio identity.
+          Verify a password for {account.email}. The server saves it encrypted only after{' '}
+          {providerName}
+          confirms the login. Managed accounts must keep the same {providerName} identity.
         </p>
         <form
           className="space-y-3"
@@ -343,7 +368,7 @@ export function ManagedAccountOperations({
           }}
         >
           <label className="block space-y-1">
-            <span>Stremio password</span>
+            <span>{providerName} password</span>
             <input
               ref={passwordInput}
               type="password"

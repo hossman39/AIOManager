@@ -279,7 +279,7 @@ export function createManagedGroupRepository({
               target: 'active',
             }).configuration
             await tx.run(
-              `UPDATE managed_accounts SET group_id = NULL, personal_enc = $1,
+              `UPDATE managed_accounts SET group_id = NULL, group_sync_requested = 0, personal_enc = $1,
               addon_overrides_enc = $2, addons_initialized = 1,
               record_version = record_version + 1, policy_version = policy_version + 1,
               updated_at = $3 WHERE owner_id = $4 AND id = $5`,
@@ -383,10 +383,7 @@ export function createManagedGroupRepository({
             'SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2',
             [owner, id]
           )
-          const job =
-            updated.state === 'active'
-              ? await jobs.enqueueInTransaction(tx, updated, 'personal', timestamp)
-              : null
+          const job = await jobs.enqueuePolicyChange(tx, updated, 'personal', timestamp)
           await audit(
             tx,
             owner,
@@ -408,8 +405,13 @@ export function createManagedGroupRepository({
         })
       )
     },
-    async assignGroup(auth, input, key) {
-      const value = parse(assignmentInput, input)
+    async assignGroup(auth, input, key, { allowFirstSync = false } = {}) {
+      const value = parse(
+        allowFirstSync
+          ? assignmentInput.extend({ startSync: z.boolean().optional() })
+          : assignmentInput,
+        input
+      )
       if (new Set(value.accounts.map((row) => row.id)).size !== value.accounts.length)
         throw new ManagedError('INVALID_INPUT')
       value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -437,7 +439,9 @@ export function createManagedGroupRepository({
             if (destination && row.state === 'active' && destination.published_revision === null)
               throw new ManagedError('GROUP_NOT_PUBLISHED')
             if (destinationGuard && !value.useGroupAddons) destinationGuard(personal(row))
-            if (row.group_id === value.groupId) {
+            const firstSync = row.state === 'staged' && destination && value.startSync === true
+            const sameGroup = row.group_id === value.groupId
+            if (sameGroup && (!firstSync || row.group_sync_requested)) {
               accounts.push({ account: publicAccount(row), jobId: null })
               continue
             }
@@ -460,7 +464,7 @@ export function createManagedGroupRepository({
                   row.id,
                 ]
               )
-            } else if (value.useGroupAddons) {
+            } else if (!sameGroup && value.useGroupAddons) {
               const groupUrls = new Set(
                 destinationAddons.map((addon) => addonUrlIdentity(addon.transportUrl))
               )
@@ -481,17 +485,14 @@ export function createManagedGroupRepository({
               )
             }
             await tx.run(
-              'UPDATE managed_accounts SET group_id = $1, record_version = record_version + 1, policy_version = policy_version + 1, updated_at = $2 WHERE owner_id = $3 AND id = $4',
-              [value.groupId, timestamp, owner, row.id]
+              'UPDATE managed_accounts SET group_id = $1, group_sync_requested = $5, record_version = record_version + 1, policy_version = policy_version + 1, updated_at = $2 WHERE owner_id = $3 AND id = $4',
+              [value.groupId, timestamp, owner, row.id, Number(!!firstSync)]
             )
             const updated = await tx.get(
               'SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2',
               [owner, row.id]
             )
-            const job =
-              updated.state === 'active'
-                ? await jobs.enqueueInTransaction(tx, updated, 'assignment', timestamp)
-                : null
+            const job = await jobs.enqueuePolicyChange(tx, updated, 'assignment', timestamp)
             accounts.push({ account: publicAccount(updated), jobId: job?.id ?? null })
           }
           await audit(

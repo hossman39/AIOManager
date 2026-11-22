@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { defaultExpiryNotice, EXPIRY_NOTICE_ADDON_ID } from '../../shared/expiry-notice.js'
 import { ManagedError } from './errors.js'
+import { expiredMembershipSql } from './entitlement.js'
 
 const publicUrl = (value, base = false) => {
   if (!value) return true
@@ -102,7 +103,7 @@ export function createExpiryNoticeRepository({
             throw new ManagedError('VERSION_CONFLICT')
           const members = await tx.query(
             `SELECT * FROM managed_accounts WHERE owner_id = $1 AND state = 'active'
-            AND (suspended_at IS NOT NULL OR (lifetime = 0 AND expiry_at <= $2))
+            AND ${expiredMembershipSql('$2')}
             ORDER BY id${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
             [owner, timestamp]
           )

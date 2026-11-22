@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url'
 import { buildServer } from '../server/app.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const directory = path.join(root, 'data', 'managed-test')
+const nuvioPilot = process.argv.includes('--nuvio-pilot')
+const port = nuvioPilot ? 1612 : 1611
+const directory = path.join(root, 'data', nuvioPilot ? 'nuvio-pilot' : 'managed-test')
 const env = {
   ...process.env,
   DB_TYPE: 'sqlite',
@@ -33,10 +35,10 @@ process.once('SIGTERM', () => {
   void close()
 })
 try {
-  const address = await app.listen({ host: '127.0.0.1', port: 1611 })
-  console.log(`Managed test instance: ${address}/managed`)
+  const address = await app.listen({ host: '127.0.0.1', port })
+  console.log(`Managed test instance: ${address}/`)
   console.log(
-    'Separate test data; real Stremio transport. Managed sync starts paused for a new manager. Use dedicated test accounts.'
+    'Separate test data; real Nuvio and Stremio services. Managed sync starts paused for a new manager. Use dedicated test accounts.'
   )
 } catch (error) {
   await close()

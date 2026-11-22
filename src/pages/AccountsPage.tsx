@@ -79,7 +79,9 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
       accounts.push(connection.account)
   const pending = connected.localAccounts.filter(
     (local) =>
-      !accounts.some((account) => account.email.toLowerCase() === local.email?.toLowerCase()) &&
+      !accounts.some(
+        (account) => !account.platform && account.email.toLowerCase() === local.email?.toLowerCase()
+      ) &&
       !connected.connections.some((link) => link.localId === local.id && link.status === 'removed')
   )
   const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase())
@@ -372,6 +374,11 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
                 >
                   {account.name || account.email}
                 </Link>
+                {account.platform === 'nuvio' && (
+                  <p className="text-xs text-muted-foreground">
+                    Nuvio · Profile {account.profileId}
+                  </p>
+                )}
                 {account.name && account.name !== account.email && (
                   <p className="mt-1 break-all text-xs text-muted-foreground">{account.email}</p>
                 )}
@@ -527,7 +534,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           <div className="rounded-xl border border-dashed p-12 text-center">
             <UsersRound className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
             <h3 className="font-medium">
-              {total ? 'No matching accounts' : 'Add your first Stremio account'}
+              {total ? 'No matching accounts' : 'Add your first account'}
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">
               {total

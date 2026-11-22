@@ -4,10 +4,29 @@ Release images belong to `ghcr.io/hossman39/aiomanager`. Use the image digest or
 `sha-<full-commit>` from the tested release. Never substitute the original upstream
 image for this fork or use an unattended `latest` update.
 
-## Ready release
+## Nuvio rollout with 2.1.0
+
+Transfer the image archive for your Docker host and its `.sha256` file to the same
+directory. Use `amd64` for x86-64 or `arm64` for 64-bit ARM hosts. For example,
+on x86-64:
+
+```sh
+sha256sum -c aiomanager-2.1.0-linux-amd64.tar.gz.sha256
+docker load -i aiomanager-2.1.0-linux-amd64.tar.gz
+docker image inspect aiomanager:2.1.0 --format '{{.Os}}/{{.Architecture}} {{.Id}}'
+```
+
+Use `aiomanager:2.1.0` in the existing Portainer stack and leave **Re-pull image**
+off for this local image. For Compose with the supplied template, set
+`AIOMANAGER_IMAGE=aiomanager:2.1.0` and run
+`docker compose up -d --no-deps --pull never aiomanager` after the backup steps
+below. A published 2.1.0 multi-platform image can also be deployed by its verified
+registry digest when available.
+
+## Previous Stremio release
 
 The published 2.0.0 image passed Windows/Linux, PostgreSQL and AMD64/ARM64 checks.
-Use this exact image in the existing Portainer stack:
+Its rollback image for installations previously on this version is:
 
 ```text
 ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c
@@ -108,17 +127,19 @@ required for encryption keys and application archives with either database engin
 
 ## Live acceptance
 
-- Health endpoint succeeds through the final HTTPS hostname and the footer shows
-  `2.0.0` / build `67395d1`.
+- Health succeeds through the final HTTPS hostname. The footer shows `2.1.0` and
+  the build commit from the release.
 - Existing accounts, memberships and groups are present after a container restart.
-- A dedicated test account receives a group change, expires, and renews correctly.
-- The renewal notice and refresh behavior are checked on Android TV in the live
-  environment, as planned.
+- A dedicated Nuvio profile receives the correct group. Under **Follow membership**,
+  let a short term expire naturally, refresh addons, and try a fresh title. Renew
+  the membership, refresh again, and confirm playback. Check an existing Stremio
+  account still receives its group and plays normally.
+- Preview and import watch history on a test profile. Check a watched episode and
+  a resume point on the TV. Confirm the renewal message is readable there.
 - Settings reports the expected application-backup status. Whole-server backup
   infrastructure remains a separate follow-up.
 
-These are live checks for the deployed instance; the published image's automated
-verification is recorded in the [release](https://github.com/hossman39/AIOManager/releases/tag/v2.0.0).
+Use the [Nuvio walkthrough](docs/TESTING-MANAGED.md#nuvio-pilot) for the device checks.
 
 ## Publish a release image
 

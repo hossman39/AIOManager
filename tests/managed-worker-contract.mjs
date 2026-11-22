@@ -231,6 +231,8 @@ export function managedWorkerContract(prefix, options, fixture) {
           suspension_check_at: null,
           addon_overrides_enc: null,
           addons_initialized: 0,
+          access_override: 'automatic',
+          group_sync_requested: 0,
         }))
       )
       assert.equal((await s.db.get('SELECT execution_enc FROM managed_jobs')).execution_enc, null)

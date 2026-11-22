@@ -189,7 +189,7 @@ export function ManagedGroupMembers({
       {picking && (
         <GroupMemberDialog
           title={`Add members to ${group.name}`}
-          description="Select existing accounts. Accounts in another group will move here; account-only addons stay."
+          description="Selected accounts move to this group. Its published addons sync automatically once a membership is set. Account-only addons stay."
           blocked={submitting}
           onClose={closePicker}
         >
@@ -245,6 +245,7 @@ export function ManagedGroupMembers({
                   void mutation.submit({
                     groupId: group.id,
                     useGroupAddons: true,
+                    startSync: true,
                     accounts: toAdd.map((account) => ({
                       id: account.id,
                       expectedVersion: account.version,

@@ -120,6 +120,7 @@ export function ManagedBulkUpdate({
                   ...(group ? { sourceGroupId: group.id } : {}),
                   groupId: value.kind === 'move' ? value.groupId : null,
                   useGroupAddons: true,
+                  startSync: value.kind === 'move',
                   accounts: value.accounts,
                 },
                 key,
@@ -134,7 +135,7 @@ export function ManagedBulkUpdate({
         result.kind === 'membership'
           ? `Membership updated for ${target}.`
           : result.kind === 'move'
-            ? `${target} moved to the selected group.`
+            ? `Group saved for ${target}. ${countLabel(result.accounts.filter((item) => item.jobId).length, 'account')} queued for sync.`
             : result.kind === 'remove'
               ? `${target} removed from the group and kept as individual accounts.`
               : `Sync queued for ${target}.${result.skipped ? ` ${countLabel(result.skipped, 'account')} whose sync has not started ${result.skipped === 1 ? 'was' : 'were'} skipped.` : ''}`
@@ -322,8 +323,8 @@ export function ManagedBulkUpdate({
                 </>
               )}
               <p className="text-sm text-muted-foreground">
-                Accounts whose sync has not started stay inactive. Other accounts sync the updated
-                membership automatically.
+                Saving membership starts sync for accounts assigned to a published group through
+                Save group. Accounts already syncing apply the updated membership automatically.
               </p>
             </>
           )}
@@ -356,7 +357,7 @@ export function ManagedBulkUpdate({
               <p className="text-sm text-muted-foreground">
                 {destination === 'individual'
                   ? 'The complete addon setup and customizations stay with this account.'
-                  : 'The new group supplies shared addon settings. Account-only addons stay.'}
+                  : 'Saving syncs the published group addons automatically once a membership is set. Account-only addons stay.'}
               </p>
               {groupError && (
                 <>

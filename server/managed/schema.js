@@ -246,6 +246,18 @@ CREATE TABLE managed_external_refs (
   PRIMARY KEY (owner_id, external_ref)
 );`,
   }),
+  Object.freeze({
+    version: 10,
+    name: 'account-access-override',
+    sql: `ALTER TABLE managed_accounts ADD COLUMN access_override TEXT NOT NULL DEFAULT 'automatic'
+      CHECK (access_override IN ('automatic', 'active', 'suspended'));`,
+  }),
+  Object.freeze({
+    version: 11,
+    name: 'group-sync-on-save',
+    sql: `ALTER TABLE managed_accounts ADD COLUMN group_sync_requested INTEGER NOT NULL DEFAULT 0
+      CHECK (group_sync_requested IN (0, 1));`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

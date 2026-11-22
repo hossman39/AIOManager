@@ -22,6 +22,7 @@ import { useGuardedLeave } from '@/components/common/UnsavedWorkGuard'
 import { accountStatus, membershipLabel } from '@/components/managed/account-labels'
 import { useUIStore } from '@/store/uiStore'
 import { sameAddonSetup } from '../../shared/account-addons.js'
+import { NuvioHistory } from '@/components/managed/NuvioHistory'
 import type { ManagedAddon } from '../../shared/addon-config.js'
 import { isExpiryNotice } from '../../shared/expiry-notice.js'
 
@@ -147,6 +148,7 @@ function AccountWorkspace({ api, id }: { api: Api; id: string }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="break-words text-2xl font-semibold">{account.name || account.email}</h2>
+          {account.platform === 'nuvio' && <p>Nuvio · Profile {account.profileId}</p>}
           {account.name && account.name !== account.email && (
             <p className="mt-1 break-all text-sm text-muted-foreground">{account.email}</p>
           )}
@@ -188,6 +190,9 @@ function AccountWorkspace({ api, id }: { api: Api; id: string }) {
           {error}
         </p>
       )}
+      {tab === 'sync' && account.platform === 'nuvio' && (
+        <NuvioHistory key={account.id} api={api} account={account} />
+      )}
       {tab === 'addons' && (
         <AccountAddons
           api={api}
@@ -203,7 +208,7 @@ function AccountWorkspace({ api, id }: { api: Api; id: string }) {
           onReloaded={updated}
           onSaved={(next) => {
             updated(next)
-            setTab(next.state === 'staged' ? 'sync' : 'addons')
+            setTab(next.state === 'staged' && !next.groupSyncRequested ? 'sync' : 'addons')
           }}
           onClose={() => setTab('addons')}
         />
@@ -214,7 +219,9 @@ function AccountWorkspace({ api, id }: { api: Api; id: string }) {
           account={account}
           onSaved={(next) => {
             updated(next)
-            setTab('addons')
+            setTab(
+              next.groupSyncRequested && next.membershipType === 'unset' ? 'membership' : 'addons'
+            )
           }}
         />
       )}
@@ -243,6 +250,7 @@ function AccountAddons({
   onUpdated: (account: ManagedAccount) => void
   onSetup: () => void
 }) {
+  const providerName = account.platform === 'nuvio' ? 'Nuvio' : 'Stremio'
   const [data, setData] = useState<ManagedAccountAddons | null>(null)
   const [addons, setAddons] = useState<ManagedAddon[]>([])
   const [reading, setReading] = useState(true)
@@ -269,7 +277,7 @@ function AccountAddons({
       setEpoch((value) => value + 1)
       updated.current(result.account)
       setNotice(
-        result.account.state === 'staged'
+        result.account.state === 'staged' && !result.account.groupSyncRequested
           ? 'Addon setup saved. Set a membership and start sync when ready.'
           : 'Changes saved. Open Sync & access to follow verification.'
       )
@@ -304,7 +312,8 @@ function AccountAddons({
     return () => abort.current?.abort()
   }, [load])
   const dirty = data !== null && !sameAddonSetup(addons, data.addons)
-  const expired = account.expired || account.suspendedAt !== null
+  const expired =
+    account.accessOverride === 'suspended' || account.expired || account.suspendedAt !== null
   const verifiedExpiry =
     account.appliedVersion === account.policyVersion && account.appliedTarget === 'suspended'
   const installed = data?.installed ?? null
@@ -317,6 +326,17 @@ function AccountAddons({
     mutation.stale ||
     account.state === 'offboarding'
   useUnsavedWarning(dirty || pending || mutation.busy || mutation.uncertain)
+  useEffect(() => {
+    if (
+      data?.account.groupSyncRequested &&
+      account.state === 'active' &&
+      !dirty &&
+      !pending &&
+      !locked &&
+      !error
+    )
+      void load()
+  }, [data?.account.groupSyncRequested, account.state, dirty, pending, locked, error, load])
   const save = (allowEmpty = false) => {
     if (!data || locked || pending) return
     if (!allowEmpty && !addons.some((addon) => addon.flags?.enabled !== false)) {
@@ -337,7 +357,7 @@ function AccountAddons({
           <h3 className="font-semibold">
             {expired
               ? 'Account addons · expired'
-              : data?.source === 'stremio'
+              : data?.source === 'stremio' || data?.source === 'nuvio'
                 ? 'Installed addons'
                 : 'Account addons'}
             {data ? ` (${addons.length})` : ''}
@@ -359,7 +379,8 @@ function AccountAddons({
               void load(true)
             }}
           >
-            <RefreshCw className={`h-4 w-4 ${reading ? 'animate-spin' : ''}`} /> Check Stremio
+            <RefreshCw className={`h-4 w-4 ${reading ? 'animate-spin' : ''}`} /> Check{' '}
+            {providerName}
           </Button>
           <Button
             disabled={locked || pending || !data || (!dirty && !!data.account.setupSaved)}
@@ -370,10 +391,16 @@ function AccountAddons({
           </Button>
         </div>
       </div>
-      {data?.source === 'stremio' && (
+      {(data?.source === 'stremio' || data?.source === 'nuvio') && (
         <p className="rounded-lg border bg-muted/20 p-3 text-sm">
-          These are the addons currently on Stremio. Save this setup to manage them here, then set a
-          membership and start sync.
+          These are the addons currently on {providerName}. Save this setup to manage them here,
+          then set a membership and start sync.
+        </p>
+      )}
+      {account.platform === 'nuvio' && (
+        <p className="text-sm text-muted-foreground">
+          Nuvio syncs addon URLs, display names and order. The device loads artwork, descriptions
+          and catalogs from each addon.
         </p>
       )}
       {account.state === 'staged' && data?.account.setupSaved && !dirty && (
@@ -382,29 +409,35 @@ function AccountAddons({
             Setup saved.{' '}
             {account.membershipType === 'unset'
               ? 'Choose an expiry date or lifetime membership next.'
-              : 'Review and start the first sync to apply your setup.'}
+              : account.groupSyncRequested
+                ? 'Published group addons sync automatically.'
+                : 'Review and start the first sync to apply your setup.'}
           </span>
           <Button size="sm" variant="outline" onClick={onSetup}>
-            {account.membershipType === 'unset' ? 'Set membership' : 'Start sync'}
+            {account.membershipType === 'unset'
+              ? 'Set membership'
+              : account.groupSyncRequested
+                ? 'View sync status'
+                : 'Start sync'}
           </Button>
         </div>
       )}
       {expired && (
         <p className="rounded-lg border border-amber-500/30 p-3 text-sm">
-          {account.state === 'staged'
-            ? 'Membership expired, but sync has not been started. AIOManager has not disabled this account’s Stremio addons.'
+          {account.state === 'staged' && !account.groupSyncRequested
+            ? `Start sync to apply the expiry setup on ${providerName}.`
             : verifiedExpiry
-              ? `The selected expiry setup was verified on Stremio${account.verifiedAt ? ` at ${new Date(account.verifiedAt).toLocaleString()}` : ''}.`
-              : 'Membership expired. The expiry setup has not yet been verified. Check Sync & access for progress or errors.'}{' '}
+              ? `The selected expiry setup was verified on ${providerName}${account.verifiedAt ? ` at ${new Date(account.verifiedAt).toLocaleString()}` : ''}.`
+              : 'The expiry setup is awaiting verification. Check Sync & access for progress or errors.'}{' '}
           Addons marked “Disable on expiry” return on renewal if their saved switch is on. Unchecked
-          addons stay available. Use Check Stremio to see the installed list.
+          addons stay available. Use Check {providerName} to see the installed list.
         </p>
       )}
       <section
         className="space-y-2 rounded-lg border bg-muted/10 p-3 text-sm"
-        aria-label="Stremio installed addons"
+        aria-label={`${providerName} installed addons`}
       >
-        <p className="font-medium">Installed on Stremio</p>
+        <p className="font-medium">Installed on {providerName}</p>
         <p className="break-all text-muted-foreground">Account: {account.email}</p>
         {installed ? (
           <>
@@ -426,29 +459,32 @@ function AccountAddons({
             )}
             {expired && data?.expiryMatchesInstalled === false && (
               <p className="text-amber-600 dark:text-amber-400">
-                Stremio does not yet match the selected expiry setup.{' '}
-                {account.state === 'staged'
+                {providerName} does not yet match the selected expiry setup.{' '}
+                {account.state === 'staged' && !account.groupSyncRequested
                   ? 'Start sync from Sync & access to enforce expiry.'
                   : 'Open Sync & access to check or retry sync.'}
               </p>
             )}
             {expired && data?.expiryMatchesInstalled === true && (
-              <p className="text-muted-foreground">Stremio matches the selected expiry setup.</p>
+              <p className="text-muted-foreground">
+                {providerName} matches the selected expiry setup.
+              </p>
             )}
             {(data?.account.version !== account.version ||
               (data?.installedAt && (account.verifiedAt ?? 0) > data.installedAt)) && (
               <p className="text-muted-foreground">
-                This account changed after the check. Check Stremio again for the latest list.
+                This account changed after the check. Check {providerName} again for the latest
+                list.
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              If your Stremio app shows a different list, fully close and reopen it, then check that
-              it is signed into the account above.
+              If your {providerName} app shows a different list, fully close and reopen it, then
+              check that it is signed into the account above.
             </p>
           </>
         ) : (
           <p className="text-muted-foreground">
-            Use Check Stremio to read the account’s actual installed addon list.
+            Use Check {providerName} to read the account’s actual installed addon list.
           </p>
         )}
       </section>
@@ -493,11 +529,11 @@ function AccountAddons({
         data.savedMatchesInstalled === false && (
           <details className="rounded-lg border p-3 text-sm">
             <summary className="cursor-pointer text-muted-foreground">
-              Stremio currently differs from this saved setup
+              {providerName} currently differs from this saved setup
             </summary>
             <p className="my-3">
-              This may be a pending sync or a change made directly in Stremio. Replacing the draft
-              copies its current installed list, including an empty list if the membership is
+              This may be a pending sync or a change made directly in {providerName}. Replacing the
+              draft copies its current installed list, including an empty list if the membership is
               expired.
             </p>
             <Button
@@ -506,10 +542,10 @@ function AccountAddons({
               disabled={locked || pending}
               onClick={() => {
                 setAddons(data.installed!.filter((addon) => !isExpiryNotice(addon)))
-                setNotice('Stremio addons copied to the draft. Review before saving.')
+                setNotice(`${providerName} addons copied to the draft. Review before saving.`)
               }}
             >
-              Use Stremio list as draft
+              Use {providerName} list as draft
             </Button>
           </details>
         )}
@@ -542,7 +578,7 @@ function AccountAddons({
         open={emptyConfirmation}
         onOpenChange={setEmptyConfirmation}
         title="Save with all addons disabled?"
-        description="When this account is active, this setup clears its active addon list on Stremio. The saved setup is retained."
+        description={`When this account is active, this setup clears its active addon list on ${providerName}. The saved setup is retained.`}
         confirmText="Save disabled setup"
         isDestructive
         onConfirm={() => {
@@ -604,8 +640,8 @@ function AccountGroup({
     <section className="max-w-2xl space-y-4 rounded-xl border bg-card p-5">
       <h3 className="font-semibold">Group membership</h3>
       <p className="text-sm text-muted-foreground">
-        A group provides a shared addon setup. You can still customize this account from its Addons
-        tab.
+        Saving a group automatically syncs its published addons to this account once a membership is
+        set. You can customize the account from its Addons tab.
       </p>
       <label className="block space-y-2 text-sm">
         <span>Manage with</span>
@@ -642,11 +678,16 @@ function AccountGroup({
       )}
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={locked || groupId === (account.groupId ?? '')}
+          disabled={
+            locked ||
+            (groupId === (account.groupId ?? '') &&
+              !(groupId && account.state === 'staged' && !account.groupSyncRequested))
+          }
           onClick={() =>
             void mutation.submit({
               groupId: groupId || null,
               useGroupAddons: true,
+              startSync: !!groupId,
               accounts: [{ id: account.id, expectedVersion: account.version }],
             })
           }

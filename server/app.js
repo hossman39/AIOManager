@@ -18,6 +18,7 @@ import { registerExpiryNoticeRoutes } from './managed/expiry-notice.js'
 import { createManagedManifestService } from './managed/manifests.js'
 import { createManagedRuntime } from './managed/runtime.js'
 import { createStremioProvider } from './managed/stremio.js'
+import { createNuvioProvider } from './managed/nuvio.js'
 import { ManagedError } from './managed/errors.js'
 import { createManagedBackupScheduler } from './managed/backups.js'
 import { registerIntegrationRoutes } from './api/v1.js'
@@ -353,6 +354,7 @@ export async function buildServer(options = {}) {
       crypto: managedCrypto,
       enabled: env.MANAGED_WRITES_ENABLED === 'true',
       provider: options.stremioProvider ?? createStremioProvider({ fetch }),
+      nuvio: options.nuvioProvider ?? createNuvioProvider({ fetch, fetchManifest: manifestService.fetchManifest }),
       onError: (code) =>
         fastify.log.warn({ category: 'Managed', code }, 'Managed writer unavailable'),
       workerOptions: { validateManifests: manifestService.validateManifests },

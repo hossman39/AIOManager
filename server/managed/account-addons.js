@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { accountSetupChanges, sameAddonSetup } from '../../shared/account-addons.js'
 import { checkedCollection, projectManagedCollection, providerCollection } from './projection.js'
 import { stremioCollection } from './stremio.js'
+import { nuvioCollection } from './nuvio.js'
 import { readAccountSetup } from './account-setup.js'
 import { providerIdentityKey } from './execution.js'
 import { equalSecret } from './crypto.js'
@@ -45,7 +46,7 @@ export function createAccountAddonRepository({
       const session = await runtime.provider.login(
         crypto.open(row.credentials_enc, binding(row, 'credentials'))
       )
-      const key = providerIdentityKey(crypto, session.id)
+      const key = providerIdentityKey(crypto, session.id, session.platform)
       if (row.provider_key && !equalSecret(row.provider_key, key))
         throw new ManagedError('IDENTITY_MISMATCH')
       if (!row.provider_key) {
@@ -58,7 +59,20 @@ export function createAccountAddonRepository({
         )
           throw new ManagedError('MANAGED_ACCOUNT')
       }
-      const observed = await runtime.provider.getCollection(session)
+      let expiryNotice = null
+      if (session.platform === 'nuvio') {
+        const ownerSettings = await db.get('SELECT * FROM managed_owners WHERE owner_id = $1', [
+          row.owner_id,
+        ])
+        expiryNotice = expiryNoticeAddon({
+          ...readExpiryNotice(ownerSettings, crypto),
+          enabled: true,
+        })
+      }
+      const observed = await runtime.provider.getCollection(session, {
+        hydrate: true,
+        expiryNotice,
+      })
       const current = await get(db, row.owner_id, row.id)
       if (current.record_version !== row.record_version) throw new ManagedError('VERSION_CONFLICT')
       return checkedCollection(observed)
@@ -85,7 +99,9 @@ export function createAccountAddonRepository({
     savedMatchesInstalled:
       installed === null
         ? null
-        : sameAddonSetup(installed, stremioCollection(providerCollection(addons))),
+        : publicAccount(row).platform === 'nuvio'
+          ? sameAddonSetup(nuvioCollection(installed), nuvioCollection(providerCollection(addons)))
+          : sameAddonSetup(installed, stremioCollection(providerCollection(addons))),
   })
   return {
     async getAccountAddons(auth, id, { live = false } = {}) {
@@ -110,14 +126,17 @@ export function createAccountAddonRepository({
           target: 'suspended',
           expiryNotice: expiryNoticeAddon(readExpiryNotice(settings, crypto)),
         }).expected
-        expiryMatchesInstalled = sameAddonSetup(installed, stremioCollection(expected))
+        expiryMatchesInstalled =
+          publicAccount(row).platform === 'nuvio'
+            ? sameAddonSetup(nuvioCollection(installed), nuvioCollection(expected))
+            : sameAddonSetup(installed, stremioCollection(expected))
       }
       return response(
         row,
         setup,
         addons,
         installed,
-        initial ? 'stremio' : 'saved',
+        initial ? (publicAccount(row).platform ?? 'stremio') : 'saved',
         expiryMatchesInstalled
       )
     },
@@ -160,10 +179,7 @@ export function createAccountAddonRepository({
             ]
           )
           const updated = await get(tx, owner, id)
-          const job =
-            updated.state === 'active'
-              ? await jobs.enqueueInTransaction(tx, updated, 'personal', timestamp)
-              : null
+          const job = await jobs.enqueuePolicyChange(tx, updated, 'personal', timestamp)
           return {
             ...response(
               updated,

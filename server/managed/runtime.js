@@ -1,4 +1,5 @@
 import { createStremioProvider } from './stremio.js'
+import { createNuvioProvider } from './nuvio.js'
 import { acquireWriterOwnership } from './writer-owner.js'
 import { createManagedJobStore } from './jobs.js'
 import { createManagedWorker } from './worker.js'
@@ -11,6 +12,7 @@ export function createManagedRuntime({
   crypto,
   enabled = false,
   provider = createStremioProvider(),
+  nuvio = createNuvioProvider(),
   now = Date.now,
   pollMs = 1000,
   ownershipOptions,
@@ -69,13 +71,18 @@ export function createManagedRuntime({
       await options.beforeDispatch?.()
     },
   })
+  const driver = (session) => (session?.platform === 'nuvio' ? nuvio : provider)
   const guardedProvider = {
-    normalizeCollection: provider.normalizeCollection,
-    getIdentity: (session, options) => provider.getIdentity(session, guardedOptions(options)),
-    getCollection: (session, options) => provider.getCollection(session, guardedOptions(options)),
+    normalizeCollection: (addons, session) =>
+      driver(session).normalizeCollection?.(addons) ?? addons,
+    getIdentity: (session, options) =>
+      driver(session).getIdentity(session, guardedOptions(options)),
+    getCollection: (session, options) =>
+      driver(session).getCollection(session, guardedOptions(options)),
     setCollection: (session, addons, options) =>
-      provider.setCollection(session, addons, guardedOptions(options)),
-    login: (credentials, options) => provider.login(credentials, guardedOptions(options)),
+      driver(session).setCollection(session, addons, guardedOptions(options)),
+    login: (credentials, options) =>
+      driver(credentials).login(credentials, guardedOptions(options)),
   }
   async function ensureUnmanaged(id) {
     const key = providerIdentityKey(crypto, id)
@@ -89,6 +96,7 @@ export function createManagedRuntime({
     enabled,
     jobs,
     provider: guardedProvider,
+    nuvio,
     exclusive,
     async status() {
       const metadata = await db.get(
@@ -173,7 +181,7 @@ export function createManagedRuntime({
         closed = true
         clearTimeout(timer)
         closing = (async () => {
-          await Promise.all([worker?.close(), provider.close?.()])
+          await Promise.all([worker?.close(), provider.close?.(), nuvio.close?.()])
           await tail
           await acquiring?.catch(() => {})
           await ownership?.close()

@@ -41,6 +41,19 @@ const batchSchema = previewSchema.extend({
   conflicts: z.number().int().nonnegative(),
   replayed: z.boolean(),
 })
+const nuvioProfilesSchema = z.object({
+  profiles: z.array(z.object({ id: z.number().int(), name: z.string(), inherits: z.boolean() })),
+})
+const historyPreviewSchema = z.object({
+  preview: z.uuid(),
+  watched: z.number(),
+  progress: z.number(),
+  skipped: z.array(z.string()),
+  skippedCount: z.number(),
+})
+export type HistoryPreview = z.infer<typeof historyPreviewSchema>
+const accessOverrideSchema = z.enum(['automatic', 'active', 'suspended'])
+export type AccessOverride = z.infer<typeof accessOverrideSchema>
 const accountSchema = z
   .object({
     id: z.uuid(),
@@ -48,8 +61,12 @@ const accountSchema = z
     name: z.string(),
     state: z.enum(['staged', 'active', 'offboarding']),
     groupId: z.string().nullable(),
+    groupSyncRequested: z.boolean().optional(),
     setupSaved: z.boolean().optional(),
+    platform: z.literal('nuvio').optional(),
+    profileId: z.number().int().optional(),
     membershipType: z.enum(['unset', 'term', 'lifetime']),
+    accessOverride: accessOverrideSchema.optional(),
     version: z.number().int().positive(),
     policyVersion: z.number().int().positive(),
     expiry: z
@@ -207,7 +224,7 @@ const accountAddonsSchema = z.object({
     }
     return parsed.overrides
   }),
-  source: z.enum(['saved', 'stremio']),
+  source: z.enum(['saved', 'stremio', 'nuvio']),
   installed: addonsSchema.nullable(),
   installedAt: z.number().int().nullable().optional(),
   savedMatchesInstalled: z.boolean().nullable().optional(),
@@ -324,6 +341,8 @@ const deploymentSchema = z
               'WRITE_PAUSED',
               'INVALID_STATE',
               'IDENTITY_MISMATCH',
+              'MANAGED_ACCOUNT',
+              'NUVIO_PROFILE',
             ])
             .nullable(),
         })
@@ -382,6 +401,8 @@ export type BulkMembership =
 export type GroupMemberSelection = { id: string; expectedVersion: number }[]
 
 const errorMessages = {
+  ACCOUNT_EXISTS:
+    'This profile is already managed. Turn off copying to open its existing settings.',
   UNAUTHORIZED: 'Your manager session could not be verified. Sign in again.',
   NOT_FOUND: 'This managed record was not found.',
   INVALID_INPUT: 'The request could not be accepted. Check the selected file or values.',
@@ -419,14 +440,14 @@ const errorMessages = {
   AMBIGUOUS_EXPIRY:
     'That time occurs twice in the selected timezone. Choose the intended occurrence.',
   DATA_UNREADABLE: 'The server cannot decrypt managed data. Restore its matching encryption key.',
-  WRITE_PAUSED: 'Managed sync is disabled on this server.',
+  WRITE_PAUSED:
+    'Resume managed writes in Settings → Account sync. The server must also have managed writes enabled.',
   WRITER_UNAVAILABLE:
     'The sync writer is recovering or running in another instance. Try again shortly.',
-  MANAGED_ACCOUNT:
-    'This Stremio account is already managed or was removed. Use its managed record.',
-  PROVIDER_FAILURE: 'Stremio could not confirm the operation. Check the account and retry.',
-  INVALID_CREDENTIALS: 'Stremio rejected the saved credentials. Check the email and password.',
-  IDENTITY_MISMATCH: 'The Stremio login belongs to a different account. No addons were changed.',
+  MANAGED_ACCOUNT: 'This account is already managed or was removed. Use its managed record.',
+  PROVIDER_FAILURE: 'The provider could not confirm the operation. Check the account and retry.',
+  INVALID_CREDENTIALS: 'The provider rejected the credentials. Check the email and password.',
+  IDENTITY_MISMATCH: 'The login belongs to a different account. No addons were changed.',
   FILE_TOO_LARGE: 'The import file exceeds 10 MiB.',
   REQUEST_TOO_LARGE: 'The request exceeds the size limit for this operation.',
   UNSUPPORTED_VERSION: 'This export version is not supported.',
@@ -440,6 +461,8 @@ const errorMessages = {
   API_KEY_LIMIT: 'Revoke an unused key first. You can have up to 20 active API keys.',
   FORBIDDEN: 'This API key does not permit that action.',
   CANCELLED: 'The request was cancelled.',
+  NUVIO_PROFILE: 'Choose an independent Nuvio profile. Shared profiles follow the primary setup.',
+  NUVIO_CONFIRM_EMAIL: 'Confirm your Nuvio email, then choose Connect existing and sign in.',
   INVALID_SERVER: 'Check the configured sync server URL before importing credentials.',
 } as const
 
@@ -481,12 +504,12 @@ export function createManagedApi({
   async function request<T>(
     path: string,
     schema: z.ZodType<T>,
-    options: { body?: unknown; key?: string; signal?: AbortSignal } = {}
+    options: { body?: unknown; key?: string; signal?: AbortSignal; timeoutMs?: number } = {}
   ): Promise<T> {
     const controller = new AbortController()
     const abort = () => controller.abort()
     options.signal?.addEventListener('abort', abort, { once: true })
-    const timeout = setTimeout(abort, 30_000)
+    const timeout = setTimeout(abort, options.timeoutMs ?? 30_000)
     try {
       if (!managerId || !password) throw new ManagedApiError('UNAUTHORIZED')
       if (options.signal?.aborted) throw new ManagedApiError('CANCELLED')
@@ -535,6 +558,43 @@ export function createManagedApi({
     }
   }
   return {
+    nuvioProfiles: (email: string, password: string, register: boolean, signal?: AbortSignal) =>
+      request('/nuvio/' + (register ? 'register' : 'profiles'), nuvioProfilesSchema, {
+        body: { email, password },
+        signal,
+      }),
+    connectNuvio: (
+      body: {
+        email: string
+        password: string
+        name: string
+        profileId: number
+        copyFrom?: { id: string; expectedVersion: number }
+      },
+      key: string,
+      signal?: AbortSignal
+    ) => request('/nuvio/connect', z.object({ account: accountSchema }), { body, key, signal }),
+    historyProfiles: (id: string, signal?: AbortSignal) =>
+      request('/accounts/' + encodeURIComponent(id) + '/history/profiles', nuvioProfilesSchema, {
+        signal,
+      }),
+    historyPreview: (id: string, sourceId: string, profileId: number, signal?: AbortSignal) =>
+      request('/accounts/' + encodeURIComponent(id) + '/history/preview', historyPreviewSchema, {
+        body: { sourceId, profileId },
+        signal,
+        timeoutMs: 200_000,
+      }),
+    importHistory: (id: string, preview: string) =>
+      request(
+        '/accounts/' + encodeURIComponent(id) + '/history/import',
+        z.object({
+          watched: z.number(),
+          progress: z.number(),
+          preserved: z.number(),
+          unconfirmed: z.number(),
+        }),
+        { body: { preview }, timeoutMs: 180_000 }
+      ),
     status: (signal?: AbortSignal) => request('/status', statusSchema, { signal }),
     apiKeys: (signal?: AbortSignal) =>
       request('/api-keys', z.object({ keys: z.array(apiKeySchema), scopes: z.array(z.string()) }), {
@@ -689,6 +749,7 @@ export function createManagedApi({
         groupId: string | null
         sourceGroupId?: string
         useGroupAddons?: boolean
+        startSync?: boolean
         accounts: { id: string; expectedVersion: number }[]
       },
       key: string,
@@ -778,6 +839,17 @@ export function createManagedApi({
         throw new ManagedApiError('INVALID_RESPONSE')
       return result.deployment
     },
+    setAccessOverride: (
+      id: string,
+      change: { override: AccessOverride; expectedVersion: number },
+      key: string,
+      signal?: AbortSignal
+    ) =>
+      request(`/accounts/${encodeURIComponent(id)}/access-override`, membershipResultSchema, {
+        body: change,
+        key,
+        signal,
+      }),
     setMembership: (id: string, change: MembershipChange, key: string, signal?: AbortSignal) =>
       request(`/accounts/${encodeURIComponent(id)}/membership`, membershipResultSchema, {
         body: change,

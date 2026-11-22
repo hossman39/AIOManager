@@ -4,6 +4,7 @@ import {
   ManagedApiError,
   type ManagedAccount,
   type MembershipChange,
+  type AccessOverride,
 } from '@/api/managed'
 import {
   expiryChoices,
@@ -20,6 +21,13 @@ type Props = {
   onReloaded: (account: ManagedAccount) => void
   onClose: () => void
 }
+
+const accessChoices = [
+  ['automatic', 'Follow membership'],
+  ['active', 'Keep active'],
+  ['suspended', 'Expire now'],
+] as const
+type OverrideChange = { override: AccessOverride; expectedVersion: number }
 
 /** A versioned editor: ambiguous saves retain their exact payload and retry key. */
 export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }: Props) {
@@ -43,7 +51,8 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
   const heading = useRef<HTMLHeadingElement>(null)
   const active = useRef(false)
   const abort = useRef<AbortController | null>(null)
-  const pending = useRef<{ change: MembershipChange; key: string } | null>(null)
+  const pending = useRef<{ change: MembershipChange | OverrideChange; key: string } | null>(null)
+  const selectedOverride = account.accessOverride ?? 'automatic'
   const choices = useMemo(() => expiryChoices(local, timezone), [local, timezone])
   const resolved = useMemo(() => resolveExpiry(local, offset, timezone), [local, offset, timezone])
   const valid = mode === 'lifetime' || (mode === 'term' && resolved.ok)
@@ -67,10 +76,16 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
     }
   }, [])
 
-  const save = async () => {
-    if (busy || stale || (!uncertain && !valid)) return
+  const save = async (override?: AccessOverride) => {
+    if (busy || stale || account.state === 'offboarding' || (!uncertain && !override && !valid))
+      return
     if (!pending.current) {
-      if (mode === 'lifetime') {
+      if (override) {
+        pending.current = {
+          change: { override, expectedVersion: account.version },
+          key: crypto.randomUUID(),
+        }
+      } else if (mode === 'lifetime') {
         pending.current = {
           change: { mode, expectedVersion: account.version },
           key: crypto.randomUUID(),
@@ -94,18 +109,21 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
     setBusy(true)
     setError('')
     try {
-      const result = await api.setMembership(
-        account.id,
-        request.change,
-        request.key,
-        controller.signal
-      )
+      const result =
+        'override' in request.change
+          ? await api.setAccessOverride(account.id, request.change, request.key, controller.signal)
+          : await api.setMembership(account.id, request.change, request.key, controller.signal)
       // A replay is an acknowledgement of the original save, not necessarily
       // the latest record if a second admin tab edited it in the meantime.
       const saved = result.replayed
         ? await api.account(account.id, controller.signal)
         : result.account
-      if (active.current) onSaved(saved)
+      if (active.current) {
+        pending.current = null
+        setUncertain(false)
+        if ('override' in request.change) onReloaded(saved)
+        else onSaved(saved)
+      }
     } catch (failure) {
       if (!active.current) return
       const code = failure instanceof ManagedApiError ? failure.code : 'NETWORK_ERROR'
@@ -136,7 +154,16 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
     setError('')
     try {
       const latest = await api.account(account.id, controller.signal)
-      if (active.current) onReloaded(latest)
+      if (active.current) {
+        pending.current = null
+        setUncertain(false)
+        setStale(false)
+        setMode(latest.membershipType === 'unset' ? '' : latest.membershipType)
+        setLocal(latest.expiry?.local ?? '')
+        setOffset(latest.expiry?.offset)
+        setTimezone(latest.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)
+        onReloaded(latest)
+      }
     } catch (failure) {
       if (active.current)
         setError(
@@ -163,10 +190,41 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
       >
         Membership for {account.email}
       </h4>
+      <fieldset
+        className="space-y-2"
+        disabled={busy || uncertain || stale || account.state === 'offboarding'}
+      >
+        <legend className="mb-1 text-sm font-semibold">Account access</legend>
+        <div className="flex flex-wrap gap-2">
+          {accessChoices.map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={selectedOverride === value ? 'default' : 'outline'}
+              aria-pressed={selectedOverride === value}
+              onClick={() => {
+                if (value !== selectedOverride) void save(value)
+              }}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+        <p role="status" className="text-sm text-muted-foreground">
+          {selectedOverride === 'automatic'
+            ? 'Access follows the saved membership. Choose an override to apply it in one click.'
+            : selectedOverride === 'active'
+              ? 'The saved addons stay active past expiry. Choose Follow membership to use the saved date again.'
+              : 'The expiry addon setup applies until you choose Follow membership or Keep active.'}
+        </p>
+      </fieldset>
       <p className="text-sm text-muted-foreground">
-        {account.state === 'staged'
-          ? 'Your Stremio addons stay unchanged until you start sync.'
-          : 'Changes apply through managed sync. Expiry disables the selected addons and keeps their saved setup for renewal.'}{' '}
+        {account.groupSyncRequested
+          ? 'Saving a membership starts sync with the published group addons.'
+          : account.state === 'staged'
+            ? 'Start sync to apply membership changes to the installed addons.'
+            : 'Changes apply through managed sync. Expiry disables the selected addons and keeps their saved setup for renewal.'}{' '}
         Lifetime has no automatic cutoff. An unset expiry is not a lifetime membership.
       </p>
       <form
@@ -274,13 +332,15 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
                   </select>
                 </label>
               )}
-              {resolved.ok && resolved.expiry.at <= Date.now() && (
-                <p role="status" className="text-sm text-amber-600 dark:text-amber-400">
-                  This cutoff has already passed. Once managed sync is enabled, this membership uses
-                  the selected expiry setup. Unchecked addons and the enabled expiry notice remain
-                  available.
-                </p>
-              )}
+              {selectedOverride === 'automatic' &&
+                resolved.ok &&
+                resolved.expiry.at <= Date.now() && (
+                  <p role="status" className="text-sm text-amber-600 dark:text-amber-400">
+                    This cutoff has already passed. Once managed sync is enabled, this membership
+                    uses the selected expiry setup. Unchecked addons and the enabled expiry notice
+                    remain available.
+                  </p>
+                )}
             </div>
           )}
         </fieldset>

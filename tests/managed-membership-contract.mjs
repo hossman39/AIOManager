@@ -84,6 +84,8 @@ export function managedMembershipContract(prefix, options, fixture) {
           suspension_check_at: null,
           addon_overrides_enc: null,
           addons_initialized: 0,
+          access_override: 'automatic',
+          group_sync_requested: 0,
         }))
       )
       assert.deepEqual(
@@ -259,6 +261,56 @@ export function managedMembershipContract(prefix, options, fixture) {
       'VERSION_CONFLICT'
     )
   })
+  check(
+    'manual override is owner scoped, replay safe and invalidates an in-flight expiry',
+    async (storage) => {
+      const { repository, jobs, ids, expire, enqueue } = await prepareJobFixture(storage)
+      const id = ids[0]
+      await expire(id)
+      await enqueue()
+      const disabling = await jobs.claim()
+      const before = await repository.getAccount(firstAuth, id)
+      const input = { expectedVersion: before.version, override: 'active' }
+      const key = randomUUID()
+      await assert.rejects(repository.setAccessOverride(secondAuth, id, input, key), {
+        code: 'NOT_FOUND',
+      })
+      const saved = await repository.setAccessOverride(firstAuth, id, input, key)
+      assert.deepEqual(saved.account.expiry, before.expiry)
+      assert.equal(saved.account.suspendedAt, null)
+      assert.equal((await repository.setAccessOverride(firstAuth, id, input, key)).replayed, true)
+      await assert.rejects(repository.setAccessOverride(firstAuth, id, input, randomUUID()), {
+        code: 'VERSION_CONFLICT',
+      })
+      assert.equal(
+        (await jobs.completeVerified(disabling, { expected: [], observed: [] })).state,
+        'superseded'
+      )
+      assert.equal((await jobs.claim()).target, 'active')
+      const unchanged = await repository.setAccessOverride(
+        firstAuth,
+        id,
+        { ...input, expectedVersion: saved.account.version },
+        randomUUID()
+      )
+      assert.equal(unchanged.jobId, null)
+      assert.equal(unchanged.account.version, saved.account.version)
+      const renewed = await repository.setMembership(
+        firstAuth,
+        id,
+        { mode: 'lifetime', expectedVersion: saved.account.version },
+        randomUUID()
+      )
+      assert.equal(renewed.account.accessOverride, 'active')
+      const follow = await repository.setAccessOverride(
+        firstAuth,
+        id,
+        { override: 'automatic', expectedVersion: renewed.account.version },
+        randomUUID()
+      )
+      assert.equal(follow.account.expired, false)
+    }
+  )
   check(
     'an expired user renewed to lifetime supersedes in-flight disabling and retains configuration',
     async (storage) => {

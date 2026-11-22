@@ -1,30 +1,34 @@
 # AIOManager — managed accounts
 
 This is [hossman39's fork](https://github.com/hossman39/AIOManager) of AIOManager.
-Version 2.0.0 adds individual and group addon management, per-account membership
-expiry and renewal, and bulk operations.
+Version 2.1.0 manages Stremio accounts and official Nuvio profiles. When adding a
+Nuvio profile, you can copy the client's Stremio group, membership and access
+override. Watch history has a separate, one-time import.
 
 - Manage individual accounts or publish a shared group configuration.
 - Preserve personal overrides, protected addons and saved preferences through expiry.
-- Choose which addons disable on expiry; optionally show a renewal notice in Stremio.
-- Review first sync, track verified results, and remove accounts after verified cleanup.
+- Choose which addons disable on expiry and optionally show a renewal notice in Stremio or Nuvio.
+- Save an account’s group to sync its published addons automatically. Individual setups can preview their first sync.
+- Track verified results and remove accounts after verified cleanup.
 - Find accounts expiring in 7/30 days or needing attention; sort by expiry.
 - Optional integration keys can be configured later from Settings.
 - Retain daily encrypted application backups with a separate restore tool.
 
+For account setup, TV refresh and watch history, see the [Nuvio walkthrough](docs/TESTING-MANAGED.md#nuvio-pilot).
+
 ## Installation and updates
 
-Use the fork's [deployment guide](DEPLOY.md) and the published
-[2.0.0 release](https://github.com/hossman39/AIOManager/releases/tag/v2.0.0).
-The environment example pins its tested image digest. The default Compose file
+Use the fork's [deployment guide](DEPLOY.md) to select the 2.1.0 image. The
+2.0.0 image pinned in the environment example supports Stremio only. The default Compose file
 runs the app with SQLite or an existing external database; add
 [compose.postgres.yml](compose.postgres.yml) only for the bundled PostgreSQL service.
 Keep the actual database engine, mounts and keys when updating an existing stack.
 The separate [test stack](compose.managed-test.yml) uses its own data volume.
 
 Serve the app through HTTPS. Enable `MANAGED_WRITES_ENABLED=true` in the intended
-instance, then resume from **Settings → Account sync**. New accounts stay inactive
-until first-sync review and activation. Only one instance may write per database.
+instance, then resume from **Settings → Account sync**. Saving the group starts
+sync once a membership and a published group are available. Individual setups use
+first-sync review and activation. Only one instance may write per database.
 API access and the Box Manager integration are optional and are deferred for launch.
 
 ## Documentation

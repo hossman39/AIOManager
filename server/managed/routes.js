@@ -78,6 +78,26 @@ export async function registerManagedRoutes(app, repository, manifestService) {
           },
         })
       })
+      routes.post('/nuvio/profiles', { bodyLimit: 32768 }, (r) =>
+        repository.nuvioProfiles(r.managedAuth, r.body)
+      )
+      routes.post('/nuvio/register', { bodyLimit: 32768 }, (r) =>
+        repository.nuvioProfiles(r.managedAuth, r.body, true)
+      )
+      routes.post('/nuvio/connect', { bodyLimit: 32768 }, (r) =>
+        repository.connectNuvio(r.managedAuth, r.body, r.headers['idempotency-key'])
+      )
+      routes.get('/accounts/:id/history/profiles', (r) =>
+        repository.historyProfiles(r.managedAuth, r.params.id)
+      )
+      routes.post('/accounts/:id/history/preview', { bodyLimit: 4096 }, (r, reply) =>
+        cancelReadOnDisconnect(r, reply, (signal) =>
+          repository.previewNuvioHistory(r.managedAuth, r.params.id, r.body, { signal })
+        )
+      )
+      routes.post('/accounts/:id/history/import', { bodyLimit: 4096 }, (r) =>
+        repository.applyNuvioHistory(r.managedAuth, r.params.id, r.body)
+      )
       routes.get('/status', (request) => repository.status(request.managedAuth))
       routes.get('/api-keys', (request) => repository.listApiKeys(request.managedAuth))
       routes.post('/api-keys', { bodyLimit: 4096 }, (request) =>
@@ -240,7 +260,8 @@ export async function registerManagedRoutes(app, repository, manifestService) {
         repository.assignGroup(
           request.managedAuth,
           request.body,
-          request.headers['idempotency-key']
+          request.headers['idempotency-key'],
+          { allowFirstSync: true }
         )
       )
       routes.post('/accounts/bulk-membership', { bodyLimit: 32 * 1024 }, (request) =>
@@ -304,6 +325,14 @@ export async function registerManagedRoutes(app, repository, manifestService) {
       )
       routes.get('/imports/:id', (request) =>
         repository.getBatch(request.managedAuth, request.params.id)
+      )
+      routes.post('/accounts/:id/access-override', { bodyLimit: 4096 }, (request) =>
+        repository.setAccessOverride(
+          request.managedAuth,
+          request.params.id,
+          request.body,
+          request.headers['idempotency-key']
+        )
       )
       routes.post('/accounts/:id/membership', { bodyLimit: 4096 }, (request) =>
         repository.setMembership(

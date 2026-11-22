@@ -4,11 +4,26 @@ import { checkedCollection } from './projection.js'
 import { readAccountSetup } from './account-setup.js'
 import { emptyAccountOverrides } from '../../shared/account-addons.js'
 import { readExpiryNotice, expiryNoticeAddon } from './expiry-notice.js'
+import { addonUrlIdentity } from '../../shared/addon-config.js'
 
-export const providerIdentityKey = (crypto, id) =>
+export function activationManifests(policy, remote) {
+  const observed = new Map(
+    remote.map((addon) => [addonUrlIdentity(addon.transportUrl), addon.manifest.id])
+  )
+  const desired = new Map(
+    policy.group.map((addon) => [addonUrlIdentity(addon.transportUrl), addon])
+  )
+  for (const addon of [...policy.personal, ...policy.accountOverrides.addons]) {
+    const url = addonUrlIdentity(addon.transportUrl)
+    if (observed.get(url) !== addon.manifest.id) desired.set(url, addon)
+  }
+  return [...desired.values()]
+}
+
+export const providerIdentityKey = (crypto, id, platform = 'stremio') =>
   crypto.fingerprint(id, {
     owner: 'deployment',
-    id: 'stremio',
+    id: platform,
     purpose: 'provider-identity',
   })
 
@@ -21,10 +36,12 @@ export async function readExecutionPolicy(tx, account, crypto, target) {
     typeof provider.id !== 'string' ||
     !provider.id ||
     provider.id.length > 256 ||
-    typeof provider.authKey !== 'string' ||
-    !provider.authKey ||
-    provider.authKey.length > 16_384 ||
-    !equalSecret(account.provider_key, providerIdentityKey(crypto, provider.id))
+    (provider.platform === 'nuvio'
+      ? !provider.password || !provider.email || !Number.isInteger(provider.profileId)
+      : typeof provider.authKey !== 'string' ||
+        !provider.authKey ||
+        provider.authKey.length > 16_384) ||
+    !equalSecret(account.provider_key, providerIdentityKey(crypto, provider.id, provider.platform))
   )
     throw new ManagedError('DATA_UNREADABLE')
   const saved = checkedCollection(crypto.open(account.configuration_enc, binding('configuration')))

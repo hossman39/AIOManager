@@ -3,13 +3,15 @@ import { lockAccountSelection, lockGroupMembers, memberSelectionSchema } from '.
 import { z } from 'zod'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
-import { providerIdentityKey, readExecutionPolicy } from './execution.js'
-import { currentAccountTarget } from './entitlement.js'
+import { activationManifests, providerIdentityKey, readExecutionPolicy } from './execution.js'
+import { awaitingGroupSync, currentAccountTarget, membershipSyncCause } from './entitlement.js'
 import { projectManagedCollection } from './projection.js'
-import { addonUrlIdentity } from '../../shared/addon-config.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const versionInput = z.strictObject({ expectedVersion: z.number().int().positive() })
+const overrideInput = versionInput.extend({
+  override: z.enum(['automatic', 'active', 'suspended']),
+})
 const previewInput = versionInput.extend({ safeMode: z.boolean().nullable() })
 const activationInput = versionInput.extend({
   receipt: z.string().min(1).max(32_768),
@@ -89,7 +91,7 @@ export function createManagedOperations({
       ...row,
       state: 'active',
       safe_mode: safeMode === null ? null : Number(safeMode),
-      provider_key: providerIdentityKey(crypto, provider.id),
+      provider_key: providerIdentityKey(crypto, provider.id, provider.platform),
       provider_enc: crypto.seal(provider, binding(row, 'provider-session')),
     }
     // A chosen group must be published; individual accounts use their saved setup.
@@ -112,19 +114,20 @@ export function createManagedOperations({
   }
   async function requestSyncInTransaction(tx, owner, id, value, offboard, timestamp) {
     const row = await account(tx, owner, id, value.expectedVersion, true)
-    if (row.state === 'staged' || (offboard && row.state !== 'active'))
+    if ((row.state === 'staged' && !awaitingGroupSync(row)) || (offboard && row.state !== 'active'))
       throw new ManagedError('INVALID_STATE')
     await tx.run(
       'UPDATE managed_accounts SET state = $1, record_version = record_version + 1, policy_version = policy_version + 1, updated_at = $2 WHERE id = $3',
       [offboard ? 'offboarding' : row.state, timestamp, id]
     )
     const updated = await tx.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
-    const job = await jobs.enqueueInTransaction(
+    const job = await jobs.enqueuePolicyChange(
       tx,
       updated,
       offboard ? 'offboard' : 'manual',
       timestamp
     )
+    if (!job) throw new ManagedError('GROUP_NOT_PUBLISHED')
     await audit(
       tx,
       row,
@@ -173,6 +176,47 @@ export function createManagedOperations({
   }
 
   const operations = {
+    async setAccessOverride(auth, id, input, key) {
+      const value = parse(overrideInput, input)
+      return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
+        idempotent(
+          tx,
+          owner,
+          'accounts.access-override',
+          key,
+          { id, ...value },
+          timestamp,
+          async () => {
+            const row = await account(tx, owner, id, value.expectedVersion, true)
+            if (row.state === 'offboarding') throw new ManagedError('INVALID_STATE')
+            if (row.access_override === value.override)
+              return { account: publicAccount(row), jobId: null, replayed: false }
+            await tx.run(
+              `UPDATE managed_accounts SET access_override = $1, record_version = record_version + 1,
+             policy_version = policy_version + 1, suspension_check_at = NULL, updated_at = $2
+             WHERE owner_id = $3 AND id = $4`,
+              [value.override, timestamp, owner, id]
+            )
+            const updated = await tx.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
+            const cause = membershipSyncCause(row, updated, timestamp)
+            const jobId =
+              (await jobs.enqueuePolicyChange(tx, updated, cause, timestamp))?.id ?? null
+            await audit(
+              tx,
+              updated,
+              'membership.access-override',
+              {
+                previous: row.access_override,
+                override: value.override,
+                jobId,
+              },
+              timestamp
+            )
+            return { account: publicAccount(updated), jobId, replayed: false }
+          }
+        )
+      )
+    },
     async reconnectAccount(auth, id, input, key) {
       const value = parse(versionInput.extend({ password: z.string().min(1).max(4096) }), input)
       const change = { id, ...value },
@@ -189,10 +233,10 @@ export function createManagedOperations({
         const row = await account(db, owner, id, value.expectedVersion)
         const credentials = crypto.open(row.credentials_enc, binding(row, 'credentials'))
         const session = await runtime.provider.login({
-          email: credentials.email,
+          ...credentials,
           password: value.password,
         })
-        const providerKey = providerIdentityKey(crypto, session.id)
+        const providerKey = providerIdentityKey(crypto, session.id, session.platform)
         if (row.provider_key && !equalSecret(row.provider_key, providerKey))
           throw new ManagedError('IDENTITY_MISMATCH')
         if (!row.provider_key) await unbound(row, providerKey)
@@ -215,10 +259,7 @@ export function createManagedOperations({
               ]
             )
             const updated = await tx.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
-            const job =
-              current.state === 'staged'
-                ? null
-                : await jobs.enqueueInTransaction(tx, updated, 'manual', timestamp)
+            const job = await jobs.enqueuePolicyChange(tx, updated, 'manual', timestamp)
             await audit(tx, row, 'account.reconnected', { jobId: job?.id ?? null }, timestamp)
             return { account: publicAccount(updated), jobId: job?.id ?? null, replayed: false }
           })
@@ -238,19 +279,17 @@ export function createManagedOperations({
         await unbound(row, prepared.provider_key)
         if (typeof validateManifests !== 'function')
           throw new ManagedError('PUBLICATION_UNAVAILABLE')
-        const remote = await runtime.provider.getCollection(provider)
+        const remote = await runtime.provider.getCollection(provider, {
+          hydrate: true,
+          expiryNotice: policy.expiryNotice,
+        })
         // Existing provider descriptors (including Local Files) do not require a
         // backend fetch of their URL. New account URLs are still validated.
-        const observed = new Map(
-          remote.map((addon) => [addonUrlIdentity(addon.transportUrl), addon.manifest.id])
-        )
-        const unobserved = [...policy.personal, ...policy.accountOverrides.addons].filter(
-          (addon) => observed.get(addonUrlIdentity(addon.transportUrl)) !== addon.manifest.id
-        )
-        if ((await validateManifests([...policy.group, ...unobserved])) !== true)
+        if ((await validateManifests(activationManifests(policy, remote))) !== true)
           throw new ManagedError('MANIFEST_UNAVAILABLE')
         const plan = projectManagedCollection({ ...policy, remote })
-        const expected = runtime.provider.normalizeCollection?.(plan.expected) ?? plan.expected
+        const expected =
+          runtime.provider.normalizeCollection?.(plan.expected, provider) ?? plan.expected
         const expiresAt = now() + 5 * 60_000
         return {
           accountId: id,
@@ -313,9 +352,13 @@ export function createManagedOperations({
         await unbound(row, prepared.provider_key)
         if ((await runtime.provider.getIdentity(receipt.provider)) !== receipt.provider.id)
           throw new ManagedError('IDENTITY_MISMATCH')
-        const remote = await runtime.provider.getCollection(receipt.provider)
+        const remote = await runtime.provider.getCollection(receipt.provider, {
+          hydrate: true,
+          expiryNotice: policy.expiryNotice,
+        })
         const plan = projectManagedCollection({ ...policy, remote })
-        const expected = runtime.provider.normalizeCollection?.(plan.expected) ?? plan.expected
+        const expected =
+          runtime.provider.normalizeCollection?.(plan.expected, receipt.provider) ?? plan.expected
         if (
           !equalSecret(digest(row, remote, 'activation-remote'), receipt.remoteDigest) ||
           !equalSecret(digest(row, expected, 'activation-expected'), receipt.expectedDigest)

@@ -5,7 +5,13 @@ const definitions = {
   ACCOUNT_EXISTS: [409, 'This account already exists. Link its account ID explicitly.'],
   RATE_LIMITED: [429, 'Too many API requests. Wait for the Retry-After interval.'],
   NOT_FOUND: [404, 'The managed record was not found.'],
+  REQUEST_TOO_LARGE: [413, 'This request exceeds the managed import limit.'],
   INVALID_INPUT: [400, 'The managed request is invalid.'],
+  NUVIO_CONFIRM_EMAIL: [409, 'Confirm your Nuvio email, then connect the existing account.'],
+  NUVIO_PROFILE: [
+    409,
+    'Choose an independent Nuvio profile. Shared profiles follow the primary setup.',
+  ],
   INVALID_EXPIRY: [422, 'Select a valid expiry date and time.'],
   INVALID_TIMEZONE: [422, 'Select a valid named timezone.'],
   NONEXISTENT_EXPIRY: [
@@ -68,14 +74,14 @@ const definitions = {
     503,
     'The sync writer is starting, recovering, or owned by another instance. Try again shortly.',
   ],
-  MANAGED_ACCOUNT: [
-    409,
-    'This Stremio account is managed here. Use Managed users to change its addons.',
+  MANAGED_ACCOUNT: [409, 'This account is managed here. Use Managed users to change its addons.'],
+  PROVIDER_FAILURE: [
+    502,
+    'The streaming service could not confirm the operation. Check the account and retry.',
   ],
-  PROVIDER_FAILURE: [502, 'Stremio could not confirm the operation. Check the account and retry.'],
   INVALID_CREDENTIALS: [
     422,
-    'Stremio rejected the saved credentials. Check the email and password.',
+    'The streaming service rejected the saved credentials. Check the email and password.',
   ],
   LEASE_LOST: [409, 'The job lease is no longer current.'],
   IDENTITY_MISMATCH: [409, 'The provider session does not match the enrolled account.'],

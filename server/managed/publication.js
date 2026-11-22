@@ -4,6 +4,7 @@ import { addonUrlIdentity } from '../../shared/addon-config.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { currentAccountTarget } from './jobs.js'
+import { awaitingGroupSync } from './entitlement.js'
 
 export const MAX_PUBLICATION_MEMBERS = 1000
 export const PUBLICATION_PREVIEW_TTL_MS = 5 * 60_000
@@ -81,9 +82,13 @@ export function createGroupPublicationRepository({
     if (members.length > MAX_PUBLICATION_MEMBERS) throw new ManagedError('GROUP_TOO_LARGE')
     const counts = { active: 0, suspended: 0, staged: 0, offboarding: 0 }
     const cohort = members.map((account) => {
-      const target = currentAccountTarget(account, timestamp)
+      const starting = awaitingGroupSync(account)
+      const target = currentAccountTarget(
+        starting ? { ...account, state: 'active' } : account,
+        timestamp
+      )
       counts[
-        account.state === 'staged'
+        account.state === 'staged' && !starting
           ? 'staged'
           : account.state === 'offboarding'
             ? 'offboarding'
@@ -187,7 +192,7 @@ export function createGroupPublicationRepository({
     )
     const cohort = []
     for (const account of state.members) {
-      if (account.state !== 'active') continue
+      if (account.state !== 'active' && !awaitingGroupSync(account)) continue
       await tx.run(
         'UPDATE managed_accounts SET policy_version = policy_version + 1, record_version = record_version + 1, updated_at = $1 WHERE owner_id = $2 AND id = $3',
         [timestamp, owner, account.id]
@@ -198,7 +203,7 @@ export function createGroupPublicationRepository({
         record_version: account.record_version + 1,
         updated_at: timestamp,
       }
-      const job = await jobs.enqueueInTransaction(tx, updated, 'publish', timestamp)
+      const job = await jobs.enqueuePolicyChange(tx, updated, 'publish', timestamp)
       cohort.push({
         accountId: account.id,
         jobId: job.id,

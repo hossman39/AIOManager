@@ -192,8 +192,9 @@ function GroupEditor({
           </select>
         </label>
         <p className="text-xs text-muted-foreground">
-          Publishing applies these settings to accounts with sync started. The expiry choices below
-          also apply to protected addons.
+          Publishing syncs these settings to enrolled members and starts group sync for newly
+          assigned members with a membership. The expiry choices below also apply to protected
+          addons.
         </p>
       </fieldset>
       <ManagedAddonCards

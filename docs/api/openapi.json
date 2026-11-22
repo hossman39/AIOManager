@@ -3,7 +3,7 @@
   "info": {
     "title": "AIOManager integration API",
     "version": "1.0.0",
-    "description": "Application 2.0.0. All timestamps are Unix milliseconds; membership also includes local wall time and IANA timezone. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
+    "description": "Application 2.1.0. All timestamps are Unix milliseconds; membership also includes local wall time and IANA timezone. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
   },
   "servers": [
     {
@@ -168,6 +168,16 @@
           },
           "updatedAt": {
             "type": "integer"
+          },
+          "accessOverride": {
+            "enum": [
+              "automatic",
+              "active",
+              "suspended"
+            ]
+          },
+          "groupSyncRequested": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -2303,7 +2313,7 @@
     "/accounts/{id}/membership": {
       "post": {
         "operationId": "post__accounts__id__membership",
-        "summary": "Set dated or lifetime membership; a past cutoff expires the account",
+        "summary": "Set dated or lifetime membership. A manual account access override takes precedence.",
         "parameters": [
           {
             "name": "id",

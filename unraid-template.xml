@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2.0">
   <Name>AIOManager</Name>
+  <!-- Published 2.0.0 Stremio image. For Nuvio 2.1.0 select the image specified in DEPLOY.md. -->
   <Repository>ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c</Repository>
   <Registry>https://github.com/hossman39/AIOManager/pkgs/container/aiomanager</Registry>
   <Network>bridge</Network>

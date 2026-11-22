@@ -87,6 +87,113 @@ export function managedRuntimeContract(prefix, options, fixture) {
       }
     })
   check(
+    'group save schedules first sync once and honors pause, draft publication and expiry',
+    async (s) => {
+      const group = (
+        await s.repository.createGroup(firstAuth, { name: 'Draft group' }, randomUUID())
+      ).group
+      const current = () => s.repository.getAccount(firstAuth, s.id)
+      const save = {
+        groupId: group.id,
+        accounts: [{ id: s.id, expectedVersion: (await current()).version }],
+        startSync: true,
+      }
+      const key = randomUUID()
+      const assignment = () =>
+        s.repository.assignGroup(firstAuth, save, key, { allowFirstSync: true })
+      assert.equal((await assignment()).accounts[0].jobId, null)
+      assert.equal((await assignment()).replayed, true)
+      assert.equal((await s.runtime.runOnce()).state, 'idle')
+      const addon = { ...configuredAddon(), flags: { enabled: true, disableOnExpiry: true } }
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        {
+          expectedVersion: (await current()).version,
+          mode: 'term',
+          local: '2020-01-01T12:00',
+          timezone: 'America/New_York',
+        },
+        randomUUID()
+      )
+      const rollout = await s.repository.publishGroupChanges(
+        firstAuth,
+        group.id,
+        {
+          expectedVersion: group.version,
+          name: group.name,
+          addons: [addon],
+          safeMode: false,
+        },
+        randomUUID()
+      )
+      assert.equal(rollout.queued, 1)
+      const settings = await s.repository.status(firstAuth)
+      const paused = await s.repository.setSettings(
+        firstAuth,
+        { expectedVersion: settings.version, writePaused: true, safeMode: true },
+        randomUUID()
+      )
+      s.user.addons = stremioCollection([addon])
+      assert.equal((await s.runtime.runOnce()).state, 'idle')
+      assert.equal(s.user.addons.length, 1)
+      await s.repository.setSettings(
+        firstAuth,
+        { expectedVersion: paused.version, writePaused: false, safeMode: true },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.deepEqual(s.user.addons, [])
+      assert.equal((await current()).appliedTarget, 'suspended')
+      assert.equal(
+        (await s.repository.getDeployment(firstAuth, rollout.deploymentId)).counts.verified,
+        1
+      )
+      await s.repository.setMembership(
+        firstAuth,
+        s.id,
+        { expectedVersion: (await current()).version, mode: 'lifetime' },
+        randomUUID()
+      )
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+      assert.equal(s.user.addons[0].manifest.id, addon.manifest.id)
+    }
+  )
+  check(
+    're-saving a prior grouping starts sync and detaching during login cancels its first write',
+    async (s) => {
+      const account = () => s.repository.getAccount(firstAuth, s.id)
+      const assign = async (groupId) =>
+        s.repository.assignGroup(
+          firstAuth,
+          {
+            groupId,
+            startSync: true,
+            useGroupAddons: true,
+            accounts: [{ id: s.id, expectedVersion: (await account()).version }],
+          },
+          randomUUID(),
+          { allowFirstSync: true }
+        )
+      assert.ok((await assign(s.group.id)).accounts[0].jobId)
+      const before = s.fake.hooks.before
+      let detached = false
+      s.fake.hooks.before = async (call) => {
+        before(call)
+        if (!detached && call.type === 'Auth') {
+          detached = true
+          await assign(null)
+        }
+      }
+      assert.equal((await s.runtime.runOnce()).state, 'superseded')
+      assert.equal((await account()).state, 'staged')
+      assert.equal((await account()).groupId, null)
+      assert.equal(s.fake.calls.filter((call) => call.type === 'AddonCollectionSet').length, 0)
+      assert.ok((await assign(s.group.id)).accounts[0].jobId)
+      assert.equal((await s.runtime.runOnce()).state, 'verified')
+    }
+  )
+  check(
     'selective expiry preserves browsing and subtitles, repairs stream drift, and survives group deletion, renewal and removal',
     async (s) => {
       const addon = (name, resources, flags) => ({

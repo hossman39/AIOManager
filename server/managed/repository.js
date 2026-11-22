@@ -7,8 +7,10 @@ import { authenticateManager } from './auth.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
 import { createManagedJobStore, currentAccountTarget } from './jobs.js'
+import { expiredMembershipSql, membershipSyncCause } from './entitlement.js'
 import { createManagedGroupRepository } from './groups.js'
 import { createManagedOperations } from './operations.js'
+import { createNuvioAccounts } from './nuvio-accounts.js'
 import { createManagedConnections } from './connections.js'
 import { createAccountAddonRepository } from './account-addons.js'
 import { lockAccountSelection, lockGroupMembers, memberSelectionSchema } from './group-members.js'
@@ -137,18 +139,8 @@ export function createManagedRepository({
       owner,
       id,
     ])
-    let jobId = null
-    if (updated.state === 'active') {
-      const target = currentAccountTarget(updated, timestamp)
-      const cause =
-        target === 'suspended'
-          ? 'expiry'
-          : currentAccountTarget(account, timestamp) === 'suspended'
-            ? 'renewal'
-            : 'manual'
-      const job = await jobs.enqueueInTransaction(tx, updated, cause, timestamp)
-      jobId = job.id
-    }
+    const cause = membershipSyncCause(account, updated, timestamp)
+    const jobId = (await jobs.enqueuePolicyChange(tx, updated, cause, timestamp))?.id ?? null
     const eventId = randomUUID()
     await tx.run(
       'INSERT INTO managed_audit (id, owner_id, event_type, subject_id, detail_enc, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
@@ -260,8 +252,14 @@ export function createManagedRepository({
       id: row.id,
       email: credentials.email,
       name: credentials.name,
+      ...(credentials.platform === 'nuvio'
+        ? { platform: 'nuvio', profileId: credentials.profileId }
+        : {}),
       state: row.state,
       groupId: row.group_id,
+      ...(row.state === 'staged' && row.group_id && row.group_sync_requested
+        ? { groupSyncRequested: true }
+        : {}),
       setupSaved: row.addons_initialized === 1 || row.group_id !== null,
       membershipType: row.lifetime === 1 ? 'lifetime' : row.expiry_at === null ? 'unset' : 'term',
       version: row.record_version,
@@ -277,7 +275,8 @@ export function createManagedRepository({
               timezone: row.expiry_zone ?? row.expiry_timezone,
             },
       safeMode: row.safe_mode === null ? null : row.safe_mode === 1,
-      suspendedAt: row.suspended_at ?? null,
+      accessOverride: row.access_override ?? 'automatic',
+      suspendedAt: row.access_override === 'active' ? null : row.suspended_at ?? null,
       expired: row.state === 'active' && currentAccountTarget(row, now()) === 'suspended',
       appliedVersion: row.applied_version,
       appliedTarget: row.applied_target,
@@ -309,6 +308,17 @@ export function createManagedRepository({
       ownerTransaction,
       idempotent,
       publicAccount,
+    }),
+    ...createNuvioAccounts({
+      db,
+      crypto,
+      jobs,
+      authorize,
+      ownerTransaction,
+      idempotent,
+      publicAccount,
+      runtime,
+      now,
     }),
     ...createManagedConnections({ crypto, ownerTransaction, publicAccount }),
     ...createExpiryNoticeRepository({ db, crypto, authorize, ownerTransaction, idempotent, jobs }),
@@ -553,7 +563,7 @@ export function createManagedRepository({
             AND latest.policy_version = a.policy_version AND latest.state <> 'superseded'
           ORDER BY latest.priority DESC, latest.created_at DESC, latest.id LIMIT 1
         ) WHERE a.owner_id = $1 AND a.id > $2
-        ${view === 'expired' ? "AND a.state = 'active' AND (a.suspended_at IS NOT NULL OR (a.lifetime = 0 AND a.expiry_at <= $4))" : ''}
+        ${view === 'expired' ? `AND a.state = 'active' AND ${expiredMembershipSql('$4')}` : ''}
         ORDER BY a.id LIMIT $3`,
         view === 'expired' ? [owner, after, limit + 1, now()] : [owner, after, limit + 1]
       )

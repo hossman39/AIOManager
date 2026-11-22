@@ -33,6 +33,57 @@ for first sync, and an expired member.
 Its provider and manifest transports are synthetic; it cannot contact Stremio.
 Enter `stop` to clean up. The demo expires after 15 minutes.
 
+## Nuvio pilot
+
+Run `npm run build` and `npm run managed:test -- --nuvio-pilot` in this checkout. Open
+<http://127.0.0.1:1612/>. This uses the real Nuvio and Stremio services and a separate
+SQLite database and key in `data/nuvio-pilot`. A manager on another installation needs
+a login on this instance. Use a dedicated client account for the test.
+
+1. In **Settings → Account sync**, resume managed writes. Enable **Expiry notice**.
+   Enter an address for this test installation that the playback device can reach.
+   For a TV, route its HTTPS notice address to this instance. A loopback URL only works
+   on the test computer. Set the message to “Your membership has expired. Please
+   reach out to your contact to renew.” The optional contact URL can be
+   `https://t.me/your_username`. Include the handle in the message if you want it
+   readable on a TV without Telegram.
+2. In **Accounts → Add account → Nuvio**, choose **Connect existing** or **Create new**.
+   If managed sync is paused, **Resume sync and create account** enables queued
+   work for this manager and submits the signup. An existing login can be added while
+   sync is paused. If Nuvio requires email confirmation, confirm it and sign in with
+   **Connect existing**. Select the primary profile. Profiles that
+   share its addons follow this setup. Enroll and set a membership on each additional
+   independent profile you intend to manage. When moving a client, choose **Copy
+   membership and group from Stremio** and select their account. This copies the
+   current membership, including its exact cutoff and any manual access override.
+   A published group with a set membership syncs automatically. Later changes to
+   either account are independent. Individual addon overrides and watch history
+   are separate from this step.
+3. Mark each playback addon **Disable on expiry** in the group and publish it.
+   Set a test membership. In the account’s **Group** tab, select the group and click
+   **Save group**. Wait for **verified** in **Sync & access**. If you save the group
+   first, saving the membership starts sync automatically. For an individual setup,
+   use **Preview first sync** and **Start sync** instead. On the Nuvio device
+   sign in to the same account and profile and play a title with a managed source.
+4. In **Membership → Account access**, click **Expire now**. After **verified**, use **Check Nuvio**, then
+   use **Refresh Addons** in Nuvio and try a fresh title on the device. Confirm
+   the message and optional Telegram action. Refresh again after renewing.
+   Click **Keep active** and verify that the original sources and playback return.
+   Click **Follow membership** to resume using the saved date or lifetime membership.
+   Each override stays in effect until you change it, including across edits to the membership date.
+   Verification measures the hosted addon list. Device caches, already issued stream
+   URLs, user-installed sources, plugins and unenrolled profiles have their own behavior.
+   Enforce expiry at your source server if an issued or cached URL must stop working.
+5. To test history, connect the source Stremio login to this manager. On the Nuvio
+   account open **Sync & access → Import watch history from Stremio**. Select the
+   source and destination profile, preview, then confirm. Check one finished movie,
+   a watched episode and a partially played title on Nuvio. A second preview should
+   have nothing to add unless the source or destination changed. Series with a watched
+   bitmap need matching IMDb/Cinemeta episode metadata. Unmatched series are listed
+   in the preview. Items retain their source content IDs, so choose the same catalog
+   identifiers when checking playback on the device. The import copies watch states
+   and resume points available through Stremio, with no ongoing cross-service sync.
+
 ## Acceptance walkthrough
 
 1. Refresh and open **Accounts**. Previously added accounts connect automatically
@@ -80,7 +131,8 @@ Enter `stop` to clean up. The demo expires after 15 minutes.
    **Addons** contains the group editor; **Sync status** shows publication progress.
    Accounts moved
    from another group use the new group's shared addons and keep account-only
-   addons. Accounts whose sync has not started remain inactive. You can also use
+   addons. A saved group with automatic sync starts once the group is published
+   and membership is set. You can also use
    the account's **Group** tab or **Select → Bulk actions → Assign group** on Accounts.
    Open one member and customize an addon: the other members and the
    shared group must remain unchanged. Publish another group change; untouched
@@ -144,8 +196,8 @@ must be checked on the device; server verification does not assert that playback
 was terminated or that the Stremio login was revoked.
 If Stremio still shows defaults while **Check Stremio** shows your configured
 addons, fully close/reopen Stremio and confirm the app is signed into the displayed
-email. An account marked **Sync not started** retains its existing Stremio setup
-until its first sync is reviewed and started.
+email. For an account marked **Sync not started**, save its group to start automatic sync
+once the group is published and a membership is set. Individual setups start from **Sync & access**.
 
 The notice follows Stremio's [manifest and resource protocol](https://stremio.github.io/stremio-addon-sdk/api/responses/manifest.html)
 and uses an [external link in the source list](https://stremio.github.io/stremio-addon-sdk/api/responses/stream.html).

@@ -77,6 +77,11 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
       },
       randomUUID()
     )
+    await s.repository.setAccessOverride(
+      firstAuth, id,
+      { expectedVersion: (await s.repository.getAccount(firstAuth, id)).version, override: 'active' },
+      randomUUID()
+    )
     const expiryNotice = await s.repository.saveExpiryNotice(
       firstAuth,
       {
@@ -131,6 +136,7 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     const repository = createManagedRepository({ db: restored, crypto, legacyKeys: [syntheticKey] })
     const account = await repository.getAccount(firstAuth, id)
     assert.equal(account.expiry.timezone, 'Europe/Paris')
+    assert.equal(account.accessOverride, 'active')
     assert.equal(account.email, 'Person@example.invalid')
     assert.equal(account.setupSaved, true)
     const setup = await repository.getAccountAddons(firstAuth, id)

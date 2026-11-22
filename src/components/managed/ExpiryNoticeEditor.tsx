@@ -81,7 +81,7 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
     >
       <div>
         <h3 id="expiry-notice-heading" className="font-semibold">
-          Expiry notice in Stremio
+          Expiry notice
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Show a renewal message in movie and episode sources for expired accounts. Keep a metadata
@@ -107,7 +107,7 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
             Show a membership expired card
           </label>
           <label className="block space-y-1 text-sm" htmlFor="notice-base-url">
-            <span>AIOManager address reachable from Stremio</span>
+            <span>AIOManager address reachable from client devices</span>
             <input
               id="notice-base-url"
               className={field}
@@ -120,8 +120,8 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
             />
           </label>
           <p className="text-xs text-muted-foreground">
-            Use the address of this installation. It must stay online and allow Stremio to reach the
-            notice without a website login. HTTPS works across devices.
+            Use the address of this installation. It must stay online and allow client devices to
+            reach the notice without a website login. HTTPS works across devices.
           </p>
           {localUrl && (
             <p className="text-sm text-amber-600 dark:text-amber-400">
@@ -148,7 +148,7 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
               className={field}
               type="url"
               maxLength={2048}
-              placeholder="https://example.com/renew"
+              placeholder="https://t.me/your_username"
               value={draft.renewalUrl}
               onChange={(event) => setDraft({ ...draft, renewalUrl: event.target.value })}
             />

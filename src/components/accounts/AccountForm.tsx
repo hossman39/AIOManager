@@ -11,19 +11,22 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAccounts } from '@/hooks/useAccounts'
 import { useUIStore } from '@/store/uiStore'
+import { AccountProviderPicker, type AccountProvider } from './AccountProviderPicker'
+import { NuvioConnect } from '@/components/managed/NuvioConnect'
+import { useManagedApi } from '@/components/managed/useManagedApi'
+import type { StremioAccount } from '@/types/account'
 import {
   AlertCircle,
+  ArrowLeft,
   ExternalLink,
   HelpCircle,
-  Rocket,
-  RefreshCw,
   Smile,
   Search,
   ShieldCheck,
   MoreVertical
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Popover,
   PopoverContent,
@@ -41,6 +44,35 @@ export function AccountForm() {
   const isOpen = useUIStore((state) => state.isAddAccountDialogOpen)
   const closeDialog = useUIStore((state) => state.closeAddAccountDialog)
   const editingAccount = useUIStore((state) => state.editingAccount)
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && closeDialog()}>
+      {editingAccount
+        ? <StremioForm editingAccount={editingAccount} handleClose={closeDialog} />
+        : <AddAccount handleClose={closeDialog} />}
+    </Dialog>
+  )
+}
+
+function AddAccount({ handleClose }: { handleClose: () => void }) {
+  const [provider, setProvider] = useState<AccountProvider | null>(null)
+  const { api, ownerKey } = useManagedApi()
+  const navigate = useNavigate()
+  const back = () => setProvider(null)
+  if (provider === 'stremio') return <StremioForm handleClose={handleClose} onBack={back} />
+  if (provider === 'nuvio') return (
+    <NuvioConnect key={ownerKey} api={api} onBack={back} onConnected={(id) => {
+      handleClose()
+      navigate('/account/' + id)
+    }} />
+  )
+  return <AccountProviderPicker onSelect={setProvider} />
+}
+
+function StremioForm({ editingAccount, handleClose, onBack }: {
+  editingAccount?: StremioAccount
+  handleClose: () => void
+  onBack?: () => void
+}) {
   const encryptionKey = useAuthStore((state) => state.encryptionKey)
   const { addAccountByAuthKey, addAccountByCredentials, updateAccount, loading } = useAccounts()
 
@@ -76,11 +108,7 @@ export function AccountForm() {
       setAccentColor(undefined)
       setEmoji('')
     }
-  }, [editingAccount, isOpen])
-
-  const handleClose = () => {
-    closeDialog()
-  }
+  }, [editingAccount])
 
   const handleSubmit = async (e: React.FormEvent) => {
     if (e) {
@@ -141,14 +169,15 @@ export function AccountForm() {
   const isEditing = !!editingAccount
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent>
+      <DialogContent role="dialog" aria-modal="true" aria-labelledby="stremio-account-title">
+        {onBack && <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={onBack} className="w-fit -ml-2 text-muted-foreground"><ArrowLeft /> Apps</Button>}
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Edit Account' : 'Add Stremio Account'}</DialogTitle>
+          <DialogTitle id="stremio-account-title">{isEditing ? 'Edit Account' : 'Add Stremio Account'}</DialogTitle>
           <DialogDescription>
             {isEditing
               ? 'Update account details. Leave credentials blank to keep them unchanged.'
-              : 'Add an account using either your auth key or email and password'}
+              : mode === 'credentials' ? 'Sign in with your email and password. New emails create a Stremio account.'
+              : mode === 'oauth' ? 'Connect with a Stremio device code.' : 'Connect using your Stremio auth key.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -202,40 +231,6 @@ export function AccountForm() {
                     Auth Key
                   </Button>
                 </div>
-
-              {!isEditing && mode === 'credentials' && (
-                <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl space-y-3">
-                  <div className="flex items-center gap-2 text-primary font-semibold text-sm">
-                    <Rocket className="h-4 w-4" />
-                    <span>Smart Integration Highlights</span>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-1 bg-primary/10 p-1.5 rounded-lg text-primary">
-                        <RefreshCw className="h-3 w-3" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold">Auto-Registration</h4>
-                        <p className="text-[10px] text-muted-foreground leading-tight">
-                          Login with any email—if the Stremio account doesn't exist, we'll create it
-                          instantly for you. ✨
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="name" className="text-xs font-bold uppercase tracking-widest opacity-60">Display Name (optional)</Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="My Account"
-                  className="bg-background/50 border-muted focus:bg-background transition-colors h-11"
-                />
-              </div>
 
               {mode === 'oauth' ? (
                 <StremioOAuth
@@ -352,6 +347,16 @@ export function AccountForm() {
                   </div>
                 </div>
               )}
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-xs font-bold uppercase tracking-widest opacity-60">Display Name (optional)</Label>
+                <Input
+                  id="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="My Account"
+                  className="bg-background/50 border-muted focus:bg-background transition-colors h-11"
+                />
+              </div>
             </TabsContent>
 
             <TabsContent value="customize" className="space-y-6 animate-in fade-in slide-in-from-right-2 duration-300">
@@ -583,6 +588,5 @@ export function AccountForm() {
           </DialogFooter>
         </form>
       </DialogContent>
-    </Dialog>
   )
 }

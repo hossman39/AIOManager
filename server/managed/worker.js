@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
 import { canonicalJson } from './crypto.js'
 import { ManagedError } from './errors.js'
+import { activationManifests } from './execution.js'
 import { checkedCollection, projectManagedCollection } from './projection.js'
 
 const workers = new WeakSet()
@@ -18,6 +19,8 @@ const terminal = new Set([
   'DATA_UNREADABLE',
   'INVALID_STATE',
   'MANIFEST_UNAVAILABLE',
+  'MANAGED_ACCOUNT',
+  'NUVIO_PROFILE',
 ])
 const same = (first, second) => canonicalJson(first) === canonicalJson(second)
 
@@ -103,7 +106,7 @@ export function createManagedWorker({
     if (remaining) await wait(remaining, shutdown.signal)
     if (shutdown.signal.aborted) throw new ProviderFailure('NETWORK_ERROR')
     await jobs.heartbeat(claim)
-    await jobs.checkDispatch(claim, policy.stamp)
+    await jobs.checkDispatch(claim, policy?.stamp ?? null)
     if (shutdown.signal.aborted) throw new ProviderFailure('NETWORK_ERROR')
     nextRequest = monotonic() + requestSpacingMs
     const controller = new AbortController()
@@ -117,7 +120,7 @@ export function createManagedWorker({
         signal: controller.signal,
         beforeDispatch: async () => {
           await jobs.heartbeat(claim)
-          await jobs.checkDispatch(claim, policy.stamp)
+          await jobs.checkDispatch(claim, policy?.stamp ?? null)
         },
       })
       if (controller.signal.aborted)
@@ -144,28 +147,48 @@ export function createManagedWorker({
     const claim = await jobs.claim()
     if (!claim) return { state: 'idle' }
     try {
-      const execution = await jobs.readExecution(claim)
+      let execution = await jobs.readExecution(claim)
+      const enrolling = execution.state === 'enrolling'
+      if (enrolling) {
+        const { credentials } = execution
+        const session = await request(claim, null, (options) =>
+          provider.login(credentials, options)
+        )
+        const identity = await request(claim, null, (options) =>
+          provider.getIdentity(session, options)
+        )
+        if (identity !== session.id) throw new ProviderFailure('IDENTITY_MISMATCH')
+        await jobs.bindGroupSession(claim, session)
+        execution = await jobs.readExecution(claim)
+      }
       if (execution.state !== 'current') return { state: execution.state }
       const { policy } = execution
+      if (!enrolling) {
+        const identity = await request(claim, policy, (options) =>
+          provider.getIdentity(policy.provider, options)
+        )
+        if (identity !== policy.provider.id) throw new ProviderFailure('IDENTITY_MISMATCH')
+      }
+      const before = checkedCollection(
+        await request(claim, policy, (options) => provider.getCollection(policy.provider, options))
+      )
       if (policy.target === 'active' && validateManifests) {
         try {
           if (
-            (await validateManifests([...policy.group, ...policy.personal], {
-              signal: shutdown.signal,
-            })) !== true
+            (await validateManifests(
+              execution.firstSync
+                ? activationManifests(policy, before)
+                : [...policy.group, ...policy.personal],
+              {
+                signal: shutdown.signal,
+              }
+            )) !== true
           )
             throw new Error('Manifest validation unavailable')
         } catch {
           throw new ProviderFailure('MANIFEST_UNAVAILABLE')
         }
       }
-      const identity = await request(claim, policy, (options) =>
-        provider.getIdentity(policy.provider, options)
-      )
-      if (identity !== policy.provider.id) throw new ProviderFailure('IDENTITY_MISMATCH')
-      const before = checkedCollection(
-        await request(claim, policy, (options) => provider.getCollection(policy.provider, options))
-      )
       // Exact acceptance uses the durable plan. Otherwise recompute protection
       // against the fresh read, retaining the clean saved descriptors; a retry
       // must not remove a newly protected/default entry introduced meanwhile.
@@ -173,7 +196,8 @@ export function createManagedWorker({
         execution.plan && same(before, execution.plan.expected)
           ? execution.plan
           : { ...projectManagedCollection({ ...policy, remote: before }), stamp: policy.stamp }
-      if (provider.normalizeCollection) plan.expected = provider.normalizeCollection(plan.expected)
+      if (provider.normalizeCollection)
+        plan.expected = provider.normalizeCollection(plan.expected, policy.provider)
       if (!same(before, plan.expected)) {
         await jobs.beginWrite(claim, before, plan)
         await request(

@@ -3,6 +3,8 @@ import type { ManagedAccount, ManagedStatus } from '@/api/managed'
 const DAY = 86_400_000
 
 export function isExpired(account: ManagedAccount, now = Date.now()) {
+  if (account.accessOverride === 'active') return false
+  if (account.accessOverride === 'suspended') return true
   return (
     account.expired ||
     account.suspendedAt !== null ||
@@ -13,6 +15,7 @@ export function isExpired(account: ManagedAccount, now = Date.now()) {
 export function expiresWithin(account: ManagedAccount, days: number, now = Date.now()) {
   return (
     account.state !== 'offboarding' &&
+    account.accessOverride !== 'active' &&
     !isExpired(account, now) &&
     account.membershipType === 'term' &&
     account.expiry !== null &&
@@ -25,7 +28,8 @@ export function accountAttention(account: ManagedAccount, now = Date.now()): str
   if (account.state !== 'offboarding') {
     if (account.membershipType === 'unset') reasons.push('Set a membership')
     if (!account.setupSaved) reasons.push('Choose an addon setup')
-    if (account.state === 'staged') reasons.push('Review and start first sync')
+    if (account.state === 'staged' && !account.groupSyncRequested)
+      reasons.push('Review and start first sync')
   }
   const job = account.syncJob
   if (job?.state === 'failed') reasons.push('Sync failed — open account to repair or retry')

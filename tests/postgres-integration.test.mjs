@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import pg from 'pg'
 import { DB } from '../server/db.js'
 import { managedStorageContract, prepareManagedFixture } from './managed-contract.mjs'
+import { nuvioLifecycle } from './nuvio-managed-contract.mjs'
 import { managedJobContract } from './managed-job-contract.mjs'
 import { managedMembershipContract } from './managed-membership-contract.mjs'
 import { managedGroupsContract } from './managed-groups-contract.mjs'
@@ -53,6 +54,10 @@ async function fixture(t) {
   await db.exec('CREATE TABLE sample (id TEXT PRIMARY KEY, value INTEGER NOT NULL)')
   return db
 }
+
+test('PostgreSQL Nuvio enrollment, membership migration, scheduled expiry, renewal and watch history',
+  options, async (t) => nuvioLifecycle(await fixture(t))
+)
 
 managedStorageContract('PostgreSQL managed storage', options, async (t) =>
   prepareManagedFixture(await fixture(t))

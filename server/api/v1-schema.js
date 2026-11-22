@@ -137,6 +137,9 @@ const schemas = {
   }),
   Error: object({ error: object({ code: text, message: text, requestId: text }) }),
 }
+// Previously issued account receipts can omit this field.
+schemas.Account.properties.accessOverride = { enum: ['automatic', 'active', 'suspended'] }
+schemas.Account.properties.groupSyncRequested = { type: 'boolean' }
 
 export function apiDocument(applicationVersion, actions) {
   const paths = {}
@@ -246,7 +249,7 @@ export function apiDocument(applicationVersion, actions) {
   add(
     'post',
     '/accounts/{id}/membership',
-    'Set dated or lifetime membership; a past cutoff expires the account',
+    'Set dated or lifetime membership. A manual account access override takes precedence.',
     { action: 'membership', input: ref('Membership'), output: ref('AccountResult') }
   )
   add('post', '/accounts/bulk-membership', 'Set membership for a versioned account selection', {

@@ -5,6 +5,7 @@ import {
   backupAttention,
   compareAccounts,
   expiresWithin,
+  isExpired,
 } from '../src/lib/managed/account-health'
 import type { ManagedAccount, ManagedStatus } from '../src/api/managed'
 
@@ -30,6 +31,9 @@ const account: ManagedAccount = {
   updatedAt: now,
 }
 test('expiry windows honor exact cutoffs, suspension, lifetime and stable ordering', () => {
+  assert.equal(isExpired({ ...account, accessOverride: 'suspended' }, now), true)
+  assert.equal(isExpired({ ...account, accessOverride: 'active' }, account.expiry!.at), false)
+  assert.equal(expiresWithin({ ...account, accessOverride: 'active' }, 30, now), false)
   assert.equal(expiresWithin(account, 7, now), true)
   assert.equal(expiresWithin(account, 7, now - 1), false)
   assert.equal(expiresWithin(account, 30, account.expiry!.at), false)

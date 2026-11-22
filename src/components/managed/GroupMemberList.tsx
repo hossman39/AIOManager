@@ -4,6 +4,7 @@ import { ArrowUpRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ManagedAccount, ManagedGroupSummary } from '@/api/managed'
 import { accountStatus, membershipLabel } from './account-labels'
+import { isExpired } from '@/lib/managed/account-health'
 
 const PAGE_SIZE = 10
 const MAX_SELECTION = 200
@@ -35,10 +36,10 @@ export function GroupMemberList({
       `${account.name} ${account.email}`.toLocaleLowerCase().includes(query) &&
       (filter === 'all' ||
         (filter === 'expired'
-          ? account.expired || account.suspendedAt !== null
+          ? isExpired(account)
           : filter === 'staged'
             ? account.state === 'staged'
-            : account.state === 'active' && !account.expired && account.suspendedAt === null))
+            : account.state === 'active' && !isExpired(account)))
   )
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const currentPage = Math.min(page, pages - 1)
