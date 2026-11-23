@@ -18,17 +18,15 @@ stack. To pin the exact build, use the full `ghcr.io/...` value of
 that variable, update its value in Portainer. Follow the backup and upgrade
 steps below before redeploying.
 
-## Previous Stremio release
+## Previous releases
 
-The published 2.0.0 image passed Windows/Linux, PostgreSQL and AMD64/ARM64 checks.
-Its rollback image for installations previously on this version is:
+For a rollback, use the version recorded before the upgrade. If the schema
+changed, restore the matching pre-upgrade database and encryption key with it.
 
-```text
-ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c
-```
-
-The 2.0.0 build commit is `67395d1`. For a rollback after a schema upgrade,
-restore the matching pre-upgrade database and encryption key with that image.
+| Version | Build commit | Image |
+| --- | --- | --- |
+| 2.1.0 | `9c13184` | `ghcr.io/hossman39/aiomanager@sha256:ef17a0333f627c00af87da4c128fe891c61249eeb4af28d53a1c6b9b13848ecc` |
+| 2.0.0 | `67395d1` | `ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c` |
 
 ## Existing VPS / Portainer stack
 
