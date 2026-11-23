@@ -1,7 +1,11 @@
-import { readFile } from 'node:fs/promises'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { defaultExpiryNotice, EXPIRY_NOTICE_ADDON_ID } from '../../shared/expiry-notice.js'
+import {
+  defaultExpiryNotice,
+  EXPIRY_NOTICE_ADDON_ID,
+  expiryNoticePresentation,
+} from '../../shared/expiry-notice.js'
+import { createNoticePoster } from './expiry-notice-poster.js'
 import { ManagedError } from './errors.js'
 import { expiredMembershipSql } from './entitlement.js'
 
@@ -65,7 +69,7 @@ export function expiryNoticeAddon(settings) {
       id: EXPIRY_NOTICE_ADDON_ID,
       version: '1.0.0',
       name: 'Membership expired',
-      description: settings.message,
+      description: expiryNoticePresentation(settings).description,
       resources: [
         { name: 'catalog', types: ['movie'] },
         { name: 'meta', types: ['movie'], idPrefixes: ['aiomanager:'] },
@@ -161,7 +165,7 @@ export function createExpiryNoticeRepository({
 /** Public Stremio protocol endpoints contain only the manager's public notice.
  * No account identity, credentials, membership date, or playable content is exposed. */
 export async function registerExpiryNoticeRoutes(app, { db, crypto }) {
-  const poster = await readFile(new URL('../assets/membership-expired.png', import.meta.url))
+  const poster = await createNoticePoster()
   await app.register(
     async (routes) => {
       routes.addHook('onRequest', async (_request, reply) => {
@@ -185,24 +189,29 @@ export async function registerExpiryNoticeRoutes(app, { db, crypto }) {
         // Continue serving the notice while a disabling sync removes it from devices.
         const addon = expiryNoticeAddon({ ...settings, enabled: true })
         const base = settings.manifestUrl.slice(0, -'/manifest.json'.length)
+        const { handle, contact, description } = expiryNoticePresentation(settings)
         const meta = {
           id: itemId,
           type: 'movie',
           name: 'Membership expired',
-          poster: `${base}/poster.png`,
+          poster: `${base}/poster.png${handle ? '?contact=' + encodeURIComponent(handle) : ''}`,
           posterShape: 'square',
-          description: settings.message,
+          description,
           ...(settings.renewalUrl
             ? {
                 links: [
-                  { name: 'Renew membership', category: 'Membership', url: settings.renewalUrl },
+                  {
+                    name: contact || 'Renew membership',
+                    category: 'Membership',
+                    url: settings.renewalUrl,
+                  },
                 ],
               }
             : {}),
         }
         const cache = { cacheMaxAge: 0, staleRevalidate: 0, staleError: 0 }
         if (resource === 'manifest.json') return addon.manifest
-        if (resource === 'poster.png') return reply.type('image/png').send(poster)
+        if (resource === 'poster.png') return reply.type('image/png').send(await poster(handle))
         if (resource === 'catalog/movie/membership.json') return { metas: [meta], ...cache }
         if (/^catalog\/movie\/membership\/.+\.json$/.test(resource)) return { metas: [], ...cache }
         if (resource === `meta/movie/${itemId}.json`) return { meta, ...cache }
@@ -210,8 +219,9 @@ export async function registerExpiryNoticeRoutes(app, { db, crypto }) {
           return {
             streams: [
               {
-                name: 'Membership expired',
-                title: settings.message,
+                name: contact || 'Membership expired',
+                title: description,
+                description,
                 externalUrl: settings.renewalUrl || `${base}/renew`,
               },
             ],
@@ -229,7 +239,7 @@ export async function registerExpiryNoticeRoutes(app, { db, crypto }) {
             "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
           )
           reply.header('x-robots-tag', 'noindex, nofollow').type('text/html; charset=utf-8')
-          return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Membership expired</title><style>body{margin:0;background:#101113;color:#f9f9f9;font:18px/1.6 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}main{max-width:38rem;padding:2rem}h1{color:#f2c20e;font-size:2.5rem;line-height:1.2}p{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#f2c20e}small{color:#b8bbc3}</style><main><small>AIOManager</small><h1>Membership expired</h1><p>${escape(settings.message)}</p>${settings.renewalUrl ? `<a href="${escape(settings.renewalUrl)}" rel="noreferrer noopener">Renew membership</a>` : ''}</main></html>`
+          return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Membership expired</title><style>body{margin:0;background:#101113;color:#f9f9f9;font:18px/1.6 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}main{max-width:38rem;padding:2rem}h1{color:#f2c20e;font-size:2.5rem;line-height:1.2}p{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#f2c20e}small{color:#b8bbc3}</style><main><small>AIOManager</small><h1>Membership expired</h1><p>${escape(settings.message)}</p>${settings.renewalUrl ? `<a href="${escape(settings.renewalUrl)}" rel="noreferrer noopener">${escape(contact || 'Renew membership')}</a>` : ''}</main></html>`
         }
         return missing()
       })

@@ -40,13 +40,21 @@ Run `npm run build` and `npm run managed:test -- --nuvio-pilot` in this checkout
 SQLite database and key in `data/nuvio-pilot`. A manager on another installation needs
 a login on this instance. Use a dedicated client account for the test.
 
+For a TV on the same home network, start a second terminal on the PC and run
+`node scripts/nuvio-pilot-notice.mjs <PC-Wi-Fi-IPv4>`. Use the base URL it prints
+in **Settings → Account sync → Expiry notice** and save. This listener serves the
+public notice on port 1613 using the pilot database in read-only mode. The manager
+stays on port 1612. Keep the listener running during the test. After sync shows
+**verified**, use **Refresh Addons** on the TV's managed Nuvio profile. For clients
+outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
+
 1. In **Settings → Account sync**, resume managed writes. Enable **Expiry notice**.
    Enter an address for this test installation that the playback device can reach.
    For a TV, route its HTTPS notice address to this instance. A loopback URL only works
    on the test computer. Set the message to “Your membership has expired. Please
    reach out to your contact to renew.” The optional contact URL can be
-   `https://t.me/your_username`. Include the handle in the message if you want it
-   readable on a TV without Telegram.
+   `https://t.me/your_username`. A Telegram profile link automatically puts
+   the handle on the notice poster and in the source list so it can be read on TV.
 2. In **Accounts → Add account → Nuvio**, choose **Connect existing** or **Create new**.
    If managed sync is paused, **Resume sync and create account** enables queued
    work for this manager and submits the signup. An existing login can be added while

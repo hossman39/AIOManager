@@ -5,7 +5,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { buildServer } from '../server/app.js'
-import { defaultExpiryNotice, EXPIRY_NOTICE_ADDON_ID } from '../shared/expiry-notice.js'
+import {
+  defaultExpiryNotice,
+  EXPIRY_NOTICE_ADDON_ID,
+  expiryNoticePresentation,
+} from '../shared/expiry-notice.js'
 
 test('public expiry addon serves a card and source notice without account data; owner settings require authentication', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'aiomanager-notice-api-'))
@@ -105,7 +109,7 @@ test('public expiry addon serves a card and source notice without account data; 
     ]) {
       assert.equal((await app.inject({ method: 'GET', url })).statusCode, 404)
     }
-    await post('/api/managed/expiry-notice', {
+    const nonTelegram = await post('/api/managed/expiry-notice', {
       expectedVersion: saved.version,
       settings: { ...settings, renewalUrl: 'https://renew.example.invalid/?plan=monthly' },
     })
@@ -113,6 +117,41 @@ test('public expiry addon serves a card and source notice without account data; 
       (await get(`${base}/stream/movie/tt0123456.json`)).json().streams[0].externalUrl,
       'https://renew.example.invalid/?plan=monthly'
     )
+    assert.deepEqual((await get(`${base}/poster.png`)).rawPayload, poster.rawPayload)
+    const renewalUrl = 'https://t.me/Example_Renewals'
+    const telegram = await post('/api/managed/expiry-notice', {
+      expectedVersion: nonTelegram.version,
+      settings: { ...settings, renewalUrl },
+    })
+    const label = 'Telegram @Example_Renewals'
+    const card = (await get(`${base}/catalog/movie/membership.json`)).json().metas[0]
+    assert.equal(card.description, settings.message + '\n' + label)
+    assert.deepEqual(
+      (await get(`${base}/meta/movie/aiomanager%3Amembership-expired.json`)).json().meta,
+      card
+    )
+    assert.equal(card.links[0].url, renewalUrl)
+    const image = new URL(card.poster)
+    assert.ok(image.search)
+    const rendered = (await get(image.pathname + image.search)).rawPayload
+    assert.equal(rendered.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
+    assert.notDeepEqual(rendered, poster.rawPayload)
+    assert.deepEqual((await get(image.pathname + image.search)).rawPayload, rendered)
+    for (const path of ['movie/tt123', 'series/tt123:1:1']) {
+      const [stream] = (await get(`${base}/stream/${path}.json`)).json().streams
+      assert.equal(stream.name, label)
+      assert.equal(stream.description, card.description)
+      assert.equal(stream.title, card.description)
+      assert.equal(stream.externalUrl, renewalUrl)
+    }
+    await post('/api/managed/expiry-notice', {
+      expectedVersion: telegram.version,
+      settings: { ...settings, renewalUrl: 'https://t.me/Other_Username' },
+    })
+    const other = (await get(`${base}/catalog/movie/membership.json`)).json().metas[0]
+    assert.notEqual(other.poster, card.poster)
+    const otherImage = new URL(other.poster)
+    assert.notDeepEqual((await get(otherImage.pathname + otherImage.search)).rawPayload, rendered)
     const group = (await post('/api/managed/groups', { name: 'Delete via HTTP', addons: [] })).group
     await post(
       `/api/managed/groups/${group.id}/delete`,
@@ -132,4 +171,27 @@ test('public expiry addon serves a card and source notice without account data; 
     assert.ok(path.basename(target).startsWith('aiomanager-notice-api-'))
     await rm(target, { recursive: true, force: true })
   }
+})
+
+test('Telegram notice text preserves existing messages and keeps special links as actions', () => {
+  for (const renewalUrl of [
+    '',
+    'https://t.me/+invite',
+    'https://t.me/m/business',
+    'https://t.me/share/url?url=data',
+    'https://t.me.example.org/customer',
+    'https://example.com/customer',
+  ]) {
+    assert.deepEqual(expiryNoticePresentation({ message: 'Expired', renewalUrl }), {
+      handle: '',
+      contact: '',
+      description: 'Expired',
+    })
+  }
+  const message = 'Please message @Support_Name to renew.'
+  assert.equal(
+    expiryNoticePresentation({ message, renewalUrl: 'https://telegram.me/support_name/' })
+      .description,
+    message
+  )
 })

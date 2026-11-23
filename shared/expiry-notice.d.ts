@@ -6,4 +6,11 @@ export type ExpiryNoticeSettings = {
   renewalUrl: string
 }
 export const defaultExpiryNotice: Readonly<ExpiryNoticeSettings>
+export function expiryNoticePresentation(
+  settings: Pick<ExpiryNoticeSettings, 'message' | 'renewalUrl'>
+): {
+  handle: string
+  contact: string
+  description: string
+}
 export function isExpiryNotice(addon: { manifest?: { id?: string } }): boolean

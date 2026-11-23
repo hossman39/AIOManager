@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock3 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ManagedApiError, type createManagedApi, type ManagedExpiryNotice } from '@/api/managed'
-import { defaultExpiryNotice, type ExpiryNoticeSettings } from '../../../shared/expiry-notice.js'
+import {
+  defaultExpiryNotice,
+  expiryNoticePresentation,
+  type ExpiryNoticeSettings,
+} from '../../../shared/expiry-notice.js'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
 
 type Api = ReturnType<typeof createManagedApi>
@@ -65,6 +69,7 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
   }, [load])
   const dirty = saved !== null && JSON.stringify(draft) !== JSON.stringify(initial(saved.settings))
   const locked = reading || mutation.busy || mutation.uncertain || mutation.stale
+  const preview = expiryNoticePresentation(draft)
   useUnsavedWarning(dirty || mutation.busy || mutation.uncertain)
   let localUrl = false
   try {
@@ -160,7 +165,7 @@ export function ExpiryNoticeEditor({ api, onChanged }: { api: Api; onChanged: ()
             <Clock3 className="mb-2 h-6 w-6 text-amber-500" />
             <p className="font-semibold">Membership expired</p>
             <p className="mt-2 whitespace-pre-wrap break-words text-sm text-muted-foreground">
-              {draft.message}
+              {preview.description}
             </p>
             {draft.renewalUrl && <p className="mt-2 text-sm font-medium">Renew membership</p>}
           </div>
