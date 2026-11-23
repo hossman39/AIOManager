@@ -18,10 +18,10 @@ For account setup, TV refresh and watch history, see the [Nuvio walkthrough](doc
 
 ## Installation and updates
 
-Use the fork's [deployment guide](DEPLOY.md) to select the 2.1.0 image. The
-2.0.0 image pinned in the environment example supports Stremio only. The default Compose file
-runs the app with SQLite or an existing external database; add
-[compose.postgres.yml](compose.postgres.yml) only for the bundled PostgreSQL service.
+The 2.1.0 Docker image is `ghcr.io/hossman39/aiomanager:2.1.0` for AMD64 and ARM64.
+The [deployment guide](DEPLOY.md) covers upgrading an existing Portainer stack.
+The default Compose file runs the app with SQLite or an existing external database.
+Add [compose.postgres.yml](compose.postgres.yml) for the bundled PostgreSQL service.
 Keep the actual database engine, mounts and keys when updating an existing stack.
 The separate [test stack](compose.managed-test.yml) uses its own data volume.
 

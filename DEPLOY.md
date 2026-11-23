@@ -6,22 +6,17 @@ image for this fork or use an unattended `latest` update.
 
 ## Nuvio rollout with 2.1.0
 
-Transfer the image archive for your Docker host and its `.sha256` file to the same
-directory. Use `amd64` for x86-64 or `arm64` for 64-bit ARM hosts. For example,
-on x86-64:
+Pull the public image from the fork. Docker selects AMD64 or ARM64 for your host.
 
 ```sh
-sha256sum -c aiomanager-2.1.0-linux-amd64.tar.gz.sha256
-docker load -i aiomanager-2.1.0-linux-amd64.tar.gz
-docker image inspect aiomanager:2.1.0 --format '{{.Os}}/{{.Architecture}} {{.Id}}'
+docker pull ghcr.io/hossman39/aiomanager:2.1.0
 ```
 
-Use `aiomanager:2.1.0` in the existing Portainer stack and leave **Re-pull image**
-off for this local image. For Compose with the supplied template, set
-`AIOMANAGER_IMAGE=aiomanager:2.1.0` and run
-`docker compose up -d --no-deps --pull never aiomanager` after the backup steps
-below. A published 2.1.0 multi-platform image can also be deployed by its verified
-registry digest when available.
+Use `ghcr.io/hossman39/aiomanager:2.1.0` as the image in your existing Portainer
+stack. To pin the exact build, use the full `ghcr.io/...` value of
+`AIOMANAGER_IMAGE` in [.env.example](.env.example). If your stack already uses
+that variable, update its value in Portainer. Follow the backup and upgrade
+steps below before redeploying.
 
 ## Previous Stremio release
 
@@ -32,9 +27,8 @@ Its rollback image for installations previously on this version is:
 ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c
 ```
 
-Its build commit is `67395d1`. [.env.example](.env.example) already contains this
-digest for new installations. No integration/API key is required to launch or use
-the app. The Box Manager connection is deferred.
+The 2.0.0 build commit is `67395d1`. For a rollback after a schema upgrade,
+restore the matching pre-upgrade database and encryption key with that image.
 
 ## Existing VPS / Portainer stack
 
