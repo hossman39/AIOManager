@@ -35,7 +35,6 @@ import {
   isExpired,
 } from '@/lib/managed/account-health'
 
-const PAGE_SIZE = 12
 const MAX_SELECTION = 200
 
 export function AccountsPage() {
@@ -60,7 +59,6 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
   }, [])
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [page, setPage] = useState(0)
   const [bulk, setBulk] = useState<ManagedAccount[] | null>(null)
   const [editing, setEditing] = useState<{
     kind: 'name' | 'membership' | 'move'
@@ -112,9 +110,6 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
                   ? accountAttention(account, now).length > 0
                   : account.groupId === filter))
   )
-  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
-  const currentPage = Math.min(page, pageCount - 1)
-  const visible = shown.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
   const selectable = shown.filter((account) => account.state !== 'offboarding')
   const selectRows = (rows: ManagedAccount[]) =>
     setSelected((previous) => {
@@ -223,7 +218,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
             onClick={() => {
               if (value !== platform) {
                 setPlatform(value)
-                setPage(0)
+
                 setSelected(new Set())
               }
             }}
@@ -239,20 +234,14 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           placeholder="Search accounts…"
           value={search}
           disabled={Boolean(bulk) || Boolean(editing)}
-          onChange={(event) => {
-            setSearch(event.target.value)
-            setPage(0)
-          }}
+          onChange={(event) => setSearch(event.target.value)}
         />
         <select
           className="h-10 max-w-full rounded-md border bg-background px-3 text-sm"
           aria-label="Filter accounts"
           value={filter}
           disabled={Boolean(bulk) || Boolean(editing)}
-          onChange={(event) => {
-            setFilter(event.target.value)
-            setPage(0)
-          }}
+          onChange={(event) => setFilter(event.target.value)}
         >
           <option value="all">All accounts</option>
           <option value="individual">Individual accounts</option>
@@ -271,10 +260,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           aria-label="Sort accounts"
           value={sort}
           disabled={Boolean(bulk) || Boolean(editing)}
-          onChange={(event) => {
-            setSort(event.target.value)
-            setPage(0)
-          }}
+          onChange={(event) => setSort(event.target.value)}
         >
           <option value="name">Name A–Z</option>
           <option value="expiry">Expiry — earliest first</option>
@@ -309,22 +295,8 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
       {selecting && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
           <span className="mr-auto" role="status">
-            {selected.size} selected across all pages
+            {selected.size} selected
           </span>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={
-              locked ||
-              selected.size >= MAX_SELECTION ||
-              !visible.some(
-                (account) => account.state !== 'offboarding' && !selected.has(account.id)
-              )
-            }
-            onClick={() => selectRows(visible)}
-          >
-            Select page
-          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -364,7 +336,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
         </p>
       )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {visible.map((account) => (
+        {shown.map((account) => (
           <article
             key={account.id}
             className={`flex min-w-0 flex-col rounded-xl border p-5 ${selected.has(account.id) ? 'border-primary/40 bg-primary/5' : 'bg-card'}`}
@@ -499,35 +471,6 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           </article>
         ))}
       </div>
-      {shown.length > PAGE_SIZE && (
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-          <span>
-            {currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, shown.length)} of{' '}
-            {shown.length}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={locked || currentPage === 0}
-              onClick={() => setPage(currentPage - 1)}
-            >
-              Previous
-            </Button>
-            <span>
-              {currentPage + 1} / {pageCount}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={locked || currentPage + 1 >= pageCount}
-              onClick={() => setPage(currentPage + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
       {converting && (
         <NuvioConversionDialog
           api={api}

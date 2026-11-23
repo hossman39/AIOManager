@@ -1,7 +1,7 @@
 {
   "name": "aiomanager",
   "private": true,
-  "version": "2.3.0",
+  "version": "2.3.1",
   "build": 1,
   "type": "module",
   "scripts": {

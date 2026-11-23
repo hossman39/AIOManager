@@ -3,7 +3,7 @@
   "info": {
     "title": "AIOManager integration API",
     "version": "1.0.0",
-    "description": "Application 2.3.0. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the saved IANA timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
+    "description": "Application 2.3.1. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the saved IANA timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
   },
   "servers": [
     {

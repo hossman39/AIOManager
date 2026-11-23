@@ -111,8 +111,8 @@ outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
    Use the pencil beside a name, group or membership to edit it directly on the
    account card. Saving refreshes the card. **Select** reveals checkboxes and
    **Bulk actions** for expiry/lifetime, group assignment, removal from groups and
-   sync. Selection carries across filters and pages (12 accounts per page), with
-   up to 200 selected at once. Group removal keeps the accounts and their setups;
+   sync. All accounts appear in one scrollable list. Search or filter the list and
+   select up to 200 matching accounts at once. Group removal keeps the accounts and their setups;
    bulk sync skips accounts whose first sync has not started.
    Global sync controls and the Stremio expiry notice are under **Settings →
    Account sync**. Old `/accounts/sync-settings` bookmarks redirect there.
@@ -141,7 +141,7 @@ outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
    members; each page shows up to 10 rows. Selection carries across pages and
    filters. **Select all matching** adds matching accounts, up to 200 selected.
    Select member checkboxes and choose **Bulk update** to set a common expiry
-   date/time (with a selectable timezone), choose lifetime, move to another group,
+   date and timezone, choose lifetime, move to another group,
    remove from this group, or sync addons now. Removal keeps the accounts and their
    complete setups. Bulk sync skips accounts whose first sync has not started;
    expired accounts keep their expiry rules. Clear the selection to switch tabs.

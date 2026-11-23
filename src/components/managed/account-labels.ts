@@ -1,5 +1,7 @@
 import type { ManagedAccount } from '@/api/managed'
 
+const membershipDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
+
 export function accountStatus(account: ManagedAccount) {
   if (account.state === 'offboarding') return 'Removing'
   if (account.state === 'staged' && account.groupSyncRequested) {
@@ -28,10 +30,5 @@ export function accountStatus(account: ManagedAccount) {
 export function membershipLabel(account: ManagedAccount) {
   if (account.membershipType === 'lifetime') return 'Lifetime'
   if (!account.expiry) return 'Membership not set'
-  return (
-    new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeZone: 'UTC',
-    }).format(new Date(account.expiry.local.slice(0, 10))) + ` (${account.expiry.timezone})`
-  )
+  return `${membershipDate.format(new Date(account.expiry.local.slice(0, 10)))} (${account.expiry.timezone})`
 }
