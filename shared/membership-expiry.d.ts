@@ -20,3 +20,7 @@ export function resolveExpiry(
   offset?: number,
   timezone?: string
 ): { ok: true; expiry: MembershipExpiry } | InvalidExpiry
+export function resolveExpiryDate(
+  date: string,
+  timezone?: string
+): { ok: true; expiry: MembershipExpiry } | InvalidExpiry

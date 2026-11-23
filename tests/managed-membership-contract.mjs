@@ -9,35 +9,79 @@ export function managedMembershipContract(prefix, options, fixture) {
   const check = (name, fn) =>
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
 
+  test(
+    `${prefix}: upgrading restores today's automatic expiry once and honors overrides`,
+    options,
+    async (t) => {
+      const { db, jobs, ids, now, advance } = await prepareJobFixture(
+        await fixture(t, { migrations: managedMigrations.slice(0, 11) })
+      )
+      const noon = Date.parse('2026-11-01T17:00:00Z')
+      advance(noon - now())
+      const old = Date.parse('2026-11-01T05:00:00Z')
+      const end = Date.parse('2026-11-02T05:00:00Z')
+      await db.run(
+        `UPDATE managed_accounts SET expiry_local = '2026-11-01T01:00', expiry_at = $1,
+      expiry_offset = -240, expiry_timezone = 'America/New_York', suspended_at = $1`,
+        [old]
+      )
+      await db.run("UPDATE managed_accounts SET access_override = 'suspended' WHERE id = $1", [
+        ids[1],
+      ])
+      await db.run("UPDATE managed_accounts SET access_override = 'active' WHERE id = $1", [ids[2]])
+      await migrateManagedSchema(db, managedMigrations, noon)
+      await migrateManagedSchema(db, managedMigrations, noon)
+      for (const [i, id] of ids.entries()) {
+        const row = await db.get('SELECT * FROM managed_accounts WHERE id = $1', [id])
+        assert.equal(row.expiry_local, '2026-11-01')
+        assert.equal(row.expiry_at, end)
+        assert.equal(row.suspended_at, i === 0 ? null : old)
+        assert.equal(row.policy_version, i === 0 ? 2 : 1)
+      }
+      assert.deepEqual(await db.query('SELECT account_id, cause, target FROM managed_jobs'), [
+        { account_id: ids[0], cause: 'renewal', target: 'active' },
+      ])
+      advance(end - 1 - now())
+      assert.equal(await jobs.scanExpiry(), 0)
+      advance(1)
+      assert.equal(await jobs.scanExpiry(), 1)
+      assert.ok(
+        await db.get("SELECT id FROM managed_jobs WHERE account_id = $1 AND target = 'suspended'", [
+          ids[0],
+        ])
+      )
+    }
+  )
+
   check(
-    'chosen timezone survives saves, replay and an equivalent-instant timezone edit',
+    'changing the timezone keeps the inclusive date and recomputes the end of day',
     async ({ repository }) => {
       const id = (await repository.stageImport(firstAuth, parsedAccounts(), randomUUID()))
         .accounts[0].id
       const key = randomUUID()
       const input = {
         mode: 'term',
-        local: '2027-01-01T12:00',
+        local: '2027-01-01',
         timezone: 'Asia/Kathmandu',
         expectedVersion: 1,
       }
       const saved = await repository.setMembership(firstAuth, id, input, key)
       assert.equal(saved.account.expiry.timezone, 'Asia/Kathmandu')
       assert.equal(saved.account.expiry.offset, 345)
-      assert.equal(saved.account.expiry.at, Date.parse('2027-01-01T06:15:00Z'))
+      assert.equal(saved.account.expiry.at, Date.parse('2027-01-01T18:15:00Z'))
       assert.equal((await repository.setMembership(firstAuth, id, input, key)).replayed, true)
       const changed = await repository.setMembership(
         firstAuth,
         id,
         {
           mode: 'term',
-          local: '2027-01-01T06:15',
+          local: '2027-01-01',
           timezone: 'UTC',
           expectedVersion: saved.account.version,
         },
         randomUUID()
       )
-      assert.equal(changed.account.expiry.at, saved.account.expiry.at)
+      assert.equal(changed.account.expiry.at, Date.parse('2027-01-02T00:00:00Z'))
       assert.equal((await repository.getAccount(firstAuth, id)).expiry.timezone, 'UTC')
       await assert.rejects(
         repository.setMembership(
@@ -72,7 +116,8 @@ export function managedMembershipContract(prefix, options, fixture) {
       )
       const before = await db.query('SELECT * FROM managed_accounts ORDER BY id')
       const history = await db.get('SELECT * FROM managed_schema_migrations WHERE version = 1')
-      await migrateManagedSchema(db)
+      const upgradeTime = Date.parse('2026-11-22T16:00:00Z')
+      await migrateManagedSchema(db, managedMigrations, upgradeTime)
       assert.deepEqual(
         await db.query('SELECT * FROM managed_accounts ORDER BY id'),
         before.map((row) => ({
@@ -80,7 +125,13 @@ export function managedMembershipContract(prefix, options, fixture) {
           lifetime: 0,
           suspended_at: null,
           expiry_zone: 'America/New_York',
-          expiry_zone_offset: null,
+          expiry_zone_offset: row.id === dated ? -300 * 60 : null,
+          ...(row.id === dated && {
+            expiry_local: '2027-01-01',
+            expiry_at: Date.parse('2027-01-02T05:00:00Z'),
+            record_version: row.record_version + 1,
+            updated_at: upgradeTime,
+          }),
           suspension_check_at: null,
           addon_overrides_enc: null,
           addons_initialized: 0,
@@ -128,7 +179,7 @@ export function managedMembershipContract(prefix, options, fixture) {
     }
   )
   check(
-    'dated memberships store exact New York cutoff and require DST disambiguation',
+    'legacy date-time requests retain validation and expire at the end of the selected date',
     async ({ repository }) => {
       const id = (await repository.stageImport(firstAuth, parsedAccounts(), randomUUID()))
         .accounts[0].id
@@ -157,8 +208,8 @@ export function managedMembershipContract(prefix, options, fixture) {
         randomUUID()
       )
       assert.equal(result.account.membershipType, 'term')
-      assert.equal(result.account.expiry.at, Date.parse('2026-11-01T06:30:00Z'))
-      assert.equal(result.account.expiry.local, '2026-11-01T01:30')
+      assert.equal(result.account.expiry.at, Date.parse('2026-11-02T05:00:00Z'))
+      assert.equal(result.account.expiry.local, '2026-11-01')
       assert.equal(result.account.expiry.offset, -300)
       assert.equal(result.jobId, null)
     }

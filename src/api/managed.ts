@@ -433,10 +433,10 @@ const errorMessages = {
   MANIFEST_ID_MISMATCH: 'The URL now serves a different addon. Review its saved configuration.',
   MANIFEST_TIMEOUT: 'Manifest validation timed out or was cancelled. Try the preview again.',
   MANIFEST_BUSY: 'Manifest validation is busy. Wait for the current checks to finish.',
-  INVALID_EXPIRY: 'Choose a valid expiry date and time.',
+  INVALID_EXPIRY: 'Choose a valid expiry date.',
   INVALID_TIMEZONE: 'Choose a valid named timezone.',
   NONEXISTENT_EXPIRY:
-    'That time does not exist in the selected timezone because the clocks move forward. Choose another time.',
+    'That date or local time does not exist in the selected timezone.',
   AMBIGUOUS_EXPIRY:
     'That time occurs twice in the selected timezone. Choose the intended occurrence.',
   DATA_UNREADABLE: 'The server cannot decrypt managed data. Restore its matching encryption key.',

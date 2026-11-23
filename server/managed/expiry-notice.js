@@ -220,7 +220,7 @@ export async function registerExpiryNoticeRoutes(app, { db, crypto }) {
             streams: [
               {
                 name: contact || 'Membership expired',
-                title: description,
+                // Stremio treats title as an alias for description and rejects both together.
                 description,
                 externalUrl: settings.renewalUrl || `${base}/renew`,
               },

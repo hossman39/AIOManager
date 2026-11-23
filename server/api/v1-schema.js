@@ -37,11 +37,11 @@ const groupDraft = {
 }
 const term = {
   mode: { const: 'term' },
-  local: { type: 'string', examples: ['2027-01-15T18:00'] },
+  local: { type: 'string', examples: ['2027-01-15'] },
   timezone: { type: 'string', examples: ['America/New_York'] },
   offset: {
     type: 'number',
-    description: 'UTC offset in minutes; supply to disambiguate a repeated local time.',
+    description: 'Optional for legacy date-time requests to disambiguate a repeated local time.',
   },
 }
 const membership = {
@@ -459,7 +459,7 @@ export function apiDocument(applicationVersion, actions) {
     info: {
       title: 'AIOManager integration API',
       version: '1.0.0',
-      description: `Application ${applicationVersion}. All timestamps are Unix milliseconds; membership also includes local wall time and IANA timezone. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect.`,
+      description: `Application ${applicationVersion}. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the saved IANA timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect.`,
     },
     servers: [{ url: '/api/v1' }],
     security: [{ bearerAuth: [] }],

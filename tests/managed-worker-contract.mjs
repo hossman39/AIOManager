@@ -215,19 +215,26 @@ export function managedWorkerContract(prefix, options, fixture) {
       )
       await s.db.run(
         `UPDATE managed_accounts SET policy_version = 2, applied_version = 1, applied_target = 'suspended',
-      expiry_at = expiry_at + 86400000 WHERE id = $1`,
+      expiry_at = expiry_at + 86400000, expiry_local = '2026-09-20T12:00' WHERE id = $1`,
         [s.ids[2]]
       )
       const before = await s.db.query('SELECT * FROM managed_accounts ORDER BY id')
-      await migrateManagedSchema(s.db)
+      const upgradeTime = Date.parse('2026-10-01T00:00:00Z')
+      await migrateManagedSchema(s.db, managedMigrations, upgradeTime)
       const after = await s.db.query('SELECT * FROM managed_accounts ORDER BY id')
       assert.deepEqual(
         after,
         before.map((row) => ({
           ...row,
+          record_version: row.record_version + 1,
+          updated_at: upgradeTime,
+          expiry_local: row.expiry_local.slice(0, 10),
+          expiry_at: Date.parse(
+            row.id === s.ids[2] ? '2026-09-21T04:00:00Z' : '2026-09-20T04:00:00Z'
+          ),
           suspended_at: row.id === s.ids[2] ? null : s.now(),
           expiry_zone: 'America/New_York',
-          expiry_zone_offset: null,
+          expiry_zone_offset: -240 * 60,
           suspension_check_at: null,
           addon_overrides_enc: null,
           addons_initialized: 0,

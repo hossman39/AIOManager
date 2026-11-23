@@ -6,11 +6,7 @@ import {
   type MembershipChange,
   type AccessOverride,
 } from '@/api/managed'
-import {
-  expiryChoices,
-  resolveExpiry,
-  MEMBERSHIP_TIMEZONE,
-} from '../../../shared/membership-expiry.js'
+import { resolveExpiryDate, MEMBERSHIP_TIMEZONE } from '../../../shared/membership-expiry.js'
 import { Button } from '@/components/ui/button'
 import { useUnsavedWarning } from '@/components/common/UnsavedWorkGuard'
 
@@ -34,7 +30,7 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
   const [mode, setMode] = useState<'' | 'term' | 'lifetime'>(
     account.membershipType === 'unset' ? '' : account.membershipType
   )
-  const [local, setLocal] = useState(account.expiry?.local ?? '')
+  const [local, setLocal] = useState(account.expiry?.local.slice(0, 10) ?? '')
   const [timezone, setTimezone] = useState(account.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)
   const timezones = useMemo(() => {
     const supported =
@@ -43,7 +39,6 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
       ).supportedValuesOf?.('timeZone') ?? []
     return [...new Set([MEMBERSHIP_TIMEZONE, 'UTC', timezone, ...supported])].sort()
   }, [timezone])
-  const [offset, setOffset] = useState<number | undefined>(account.expiry?.offset)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [uncertain, setUncertain] = useState(false)
@@ -53,16 +48,14 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
   const abort = useRef<AbortController | null>(null)
   const pending = useRef<{ change: MembershipChange | OverrideChange; key: string } | null>(null)
   const selectedOverride = account.accessOverride ?? 'automatic'
-  const choices = useMemo(() => expiryChoices(local, timezone), [local, timezone])
-  const resolved = useMemo(() => resolveExpiry(local, offset, timezone), [local, offset, timezone])
+  const resolved = useMemo(() => resolveExpiryDate(local, timezone), [local, timezone])
   const valid = mode === 'lifetime' || (mode === 'term' && resolved.ok)
   useUnsavedWarning(
     busy ||
       uncertain ||
       mode !== (account.membershipType === 'unset' ? '' : account.membershipType) ||
       (mode === 'term' &&
-        (local !== (account.expiry?.local ?? '') ||
-          offset !== account.expiry?.offset ||
+        (local !== (account.expiry?.local.slice(0, 10) ?? '') ||
           timezone !== (account.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)))
   )
 
@@ -96,7 +89,6 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
             mode,
             expectedVersion: account.version,
             local,
-            offset: resolved.expiry.offset,
             timezone,
           },
           key: crypto.randomUUID(),
@@ -159,8 +151,7 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
         setUncertain(false)
         setStale(false)
         setMode(latest.membershipType === 'unset' ? '' : latest.membershipType)
-        setLocal(latest.expiry?.local ?? '')
-        setOffset(latest.expiry?.offset)
+        setLocal(latest.expiry?.local.slice(0, 10) ?? '')
         setTimezone(latest.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)
         onReloaded(latest)
       }
@@ -257,7 +248,7 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
               checked={mode === 'term'}
               onChange={() => setMode('term')}
             />
-            Dated — exact date and time
+            Dated membership
           </label>
           {mode === 'term' && (
             <div className="space-y-3">
@@ -270,10 +261,7 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
                 required
                 value={timezone}
                 className="block w-full min-w-0 max-w-md rounded-md border bg-background px-3 py-2 text-sm"
-                onChange={(event) => {
-                  setTimezone(event.target.value)
-                  setOffset(undefined)
-                }}
+                onChange={(event) => setTimezone(event.target.value)}
               />
               <datalist id="membership-timezones">
                 {timezones.map((zone) => (
@@ -281,56 +269,30 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
                 ))}
               </datalist>
               <label htmlFor="membership-cutoff" className="block text-sm font-medium">
-                Expiry date and time
+                Expiry date
               </label>
               <input
                 id="membership-cutoff"
-                type="datetime-local"
-                step="60"
-                min="1900-01-01T00:00"
-                max="9999-12-31T23:59"
+                type="date"
+                min="1900-01-01"
+                max="9999-12-31"
                 required
                 value={local}
                 className="block w-full min-w-0 max-w-md rounded-md border bg-background px-3 py-2 text-sm"
                 aria-describedby="membership-time-help"
-                onChange={(event) => {
-                  setLocal(event.target.value)
-                  setOffset(undefined)
-                }}
+                onChange={(event) => setLocal(event.target.value)}
               />
               <p id="membership-time-help" className="text-sm text-muted-foreground">
-                Uses the selected timezone, with no grace period. Changing timezone keeps the date
-                and time shown here.
+                Membership stays active through the end of this date in the selected timezone.
               </p>
-              {local && !choices.ok && (
+              {local && !resolved.ok && (
                 <p role="alert" className="text-sm text-destructive">
-                  {choices.code === 'NONEXISTENT_EXPIRY'
-                    ? 'That time does not exist in this timezone because the clocks move forward. Choose another time.'
-                    : choices.code === 'INVALID_TIMEZONE'
+                  {resolved.code === 'NONEXISTENT_EXPIRY'
+                    ? 'This date does not exist in the selected timezone.'
+                    : resolved.code === 'INVALID_TIMEZONE'
                       ? 'Select a valid timezone from the list or enter a named timezone.'
-                      : 'Enter a valid date and time.'}
+                      : 'Enter a valid date.'}
                 </p>
-              )}
-              {choices.ok && choices.choices.length > 1 && (
-                <label className="block space-y-2 text-sm" htmlFor="membership-occurrence">
-                  <span>This time occurs twice. Choose the intended occurrence.</span>
-                  <select
-                    id="membership-occurrence"
-                    required
-                    value={offset ?? ''}
-                    className="block w-full rounded-md border bg-background px-3 py-2"
-                    onChange={(event) =>
-                      setOffset(event.target.value === '' ? undefined : Number(event.target.value))
-                    }
-                  >
-                    <option value="">Choose an occurrence</option>
-                    {choices.choices.map((choice) => (
-                      <option key={choice.offset} value={choice.offset}>
-                        {choice.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               )}
               {selectedOverride === 'automatic' &&
                 resolved.ok &&

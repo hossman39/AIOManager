@@ -1,4 +1,56 @@
 import { createHash } from 'node:crypto'
+import { resolveExpiryDate } from '../../shared/membership-expiry.js'
+import { createManagedJobStore } from './jobs.js'
+
+async function migrateExpiryDates(tx, now) {
+  const jobs = createManagedJobStore({ db: tx })
+  let after = ''
+  for (;;) {
+    const accounts = await tx.query(
+      `SELECT id, owner_id, state, access_override, expiry_local, expiry_zone, expiry_at,
+        suspended_at, policy_version FROM managed_accounts
+       WHERE lifetime = 0 AND expiry_at IS NOT NULL AND id > $1 ORDER BY id LIMIT 500${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
+      [after]
+    )
+    if (!accounts.length) return
+    for (const account of accounts) {
+      const result = resolveExpiryDate(account.expiry_local.slice(0, 10), account.expiry_zone)
+      if (!result.ok)
+        throw new Error(`Cannot migrate stored membership date for account ${account.id}`)
+      const { at, local, offset } = result.expiry
+      const restore =
+        account.state === 'active' &&
+        account.access_override === 'automatic' &&
+        (account.suspended_at !== null || account.expiry_at <= now) &&
+        at > now
+      const version = account.policy_version + (restore ? 1 : 0)
+      await tx.run(
+        `UPDATE managed_accounts SET expiry_at = $1, expiry_local = $2, expiry_offset = $3,
+         expiry_zone_offset = $4, record_version = record_version + 1, policy_version = $5,
+         suspended_at = $6, updated_at = $7 WHERE id = $8`,
+        [
+          at,
+          local,
+          Math.trunc(offset),
+          Math.round(offset * 60),
+          version,
+          restore ? null : account.suspended_at,
+          now,
+          account.id,
+        ]
+      )
+      if (restore) {
+        await jobs.enqueueInTransaction(
+          tx,
+          { ...account, expiry_at: at, policy_version: version, suspended_at: null },
+          'renewal',
+          now
+        )
+      }
+    }
+    after = accounts.at(-1).id
+  }
+}
 
 // Released migrations are append-only. A checksum change stops startup rather
 // than silently treating an edited migration as already applied.
@@ -258,11 +310,14 @@ CREATE TABLE managed_external_refs (
     sql: `ALTER TABLE managed_accounts ADD COLUMN group_sync_requested INTEGER NOT NULL DEFAULT 0
       CHECK (group_sync_requested IN (0, 1));`,
   }),
+  Object.freeze({ version: 12, name: 'end-of-day-memberships', apply: migrateExpiryDates }),
 ])
 
 export function migrationChecksum(migration) {
   return createHash('sha256')
-    .update(`${migration.version}\n${migration.name}\n${migration.sql}`)
+    .update(
+      `${migration.version}\n${migration.name}\n${migration.sql ?? migration.apply.toString().replace(/\r\n/g, '\n')}`
+    )
     .digest('hex')
 }
 
@@ -287,7 +342,8 @@ export async function migrateManagedSchema(db, migrations = managedMigrations, n
         throw new Error('Managed migration history mismatch; restore or review before startup')
     }
     for (const migration of migrations.slice(applied.length)) {
-      await tx.exec(migration.sql)
+      if (migration.apply) await migration.apply(tx, now)
+      else await tx.exec(migration.sql)
       await tx.run(
         'INSERT INTO managed_schema_migrations (version, name, checksum, applied_at) VALUES ($1, $2, $3, $4)',
         [migration.version, migration.name, migrationChecksum(migration), now]

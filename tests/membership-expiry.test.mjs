@@ -3,8 +3,26 @@ import { test } from 'node:test'
 import {
   expiryChoices,
   resolveExpiry,
+  resolveExpiryDate,
   validMembershipTimezone,
 } from '../shared/membership-expiry.js'
+
+test('membership runs through the last local instant, including short, long and skipped days', () => {
+  for (const [date, zone, end] of [
+    ['2026-03-08', 'America/New_York', '2026-03-09T04:00:00Z'],
+    ['2026-11-01', 'America/New_York', '2026-11-02T05:00:00Z'],
+    ['2028-02-29', 'Asia/Kathmandu', '2028-02-29T18:15:00Z'],
+    ['2018-11-03', 'America/Sao_Paulo', '2018-11-04T03:00:00Z'],
+    ['2011-12-29', 'Pacific/Apia', '2011-12-30T10:00:00Z'],
+    ['2027-12-31', 'UTC', '2028-01-01T00:00:00Z'],
+  ]) {
+    const { expiry } = resolveExpiryDate(date, zone)
+    assert.equal(expiry.at, Date.parse(end))
+    assert.equal(expiry.local, date)
+  }
+  assert.equal(resolveExpiryDate('2011-12-30', 'Pacific/Apia').code, 'NONEXISTENT_EXPIRY')
+  assert.equal(resolveExpiryDate('2026-02-29').code, 'INVALID_EXPIRY')
+})
 
 test('selectable zones resolve fractional-hour offsets, UTC and the New York default', () => {
   for (const [zone, expected] of [

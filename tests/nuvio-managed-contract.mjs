@@ -453,11 +453,11 @@ export async function nuvioLifecycle(database, converting = false) {
     assert.equal((await request(sourceBase)).version, original.version)
     assert.equal((await app.managedRuntime.runOnce()).state, 'idle')
 
-    const future = new Date(Date.now() + 3_600_000).toISOString().slice(0, 16)
+    const future = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
     await membership({ mode: 'term', local: future, timezone: 'UTC' })
     await sync()
     assert.deepEqual(nuvio.addons.get(1), active)
-    clockOffset = 7_200_000
+    clockOffset = Date.parse(future + 'T00:00:00Z') + 86_400_000 - Date.now()
     await sync()
     assert.deepEqual(
       nuvio.addons.get(1).map((a) => a.url),

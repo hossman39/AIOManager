@@ -87,7 +87,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
       )
       const request = {
         accounts: accounts.map(({ id, version }) => ({ id, expectedVersion: version })),
-        membership: { mode: 'term', local: '2027-01-01T12:00', timezone: 'Asia/Kathmandu' },
+        membership: { mode: 'term', local: '2027-01-01', timezone: 'Asia/Kathmandu' },
       }
       const key = randomUUID()
       const result = await repository.setAccountsMembership(firstAuth, request, key)
@@ -98,7 +98,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
         assert.equal(account.groupId, previous.groupId)
         assert.equal(account.state, previous.state)
         assert.equal(account.expiry.timezone, 'Asia/Kathmandu')
-        assert.equal(account.expiry.at, Date.parse('2027-01-01T06:15:00Z'))
+        assert.equal(account.expiry.at, Date.parse('2027-01-01T18:15:00Z'))
       }
       const before = await stored(db)
       assert.equal(
@@ -278,7 +278,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
         group.id,
         {
           accounts: selection,
-          membership: { mode: 'term', local: '2027-01-01T12:00', timezone: 'Asia/Kathmandu' },
+          membership: { mode: 'term', local: '2027-01-01', timezone: 'Asia/Kathmandu' },
         },
         randomUUID()
       )
@@ -286,7 +286,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
       assert.equal(result.accounts.filter((entry) => entry.jobId).length, 2)
       for (const { account } of result.accounts) {
         assert.equal(account.expiry.timezone, 'Asia/Kathmandu')
-        assert.equal(account.expiry.at, Date.parse('2027-01-01T06:15:00Z'))
+        assert.equal(account.expiry.at, Date.parse('2027-01-01T18:15:00Z'))
         assert.equal(account.version, 3)
         assert.equal(account.state, members.find((item) => item.id === account.id).state)
       }
@@ -374,7 +374,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
   )
 
   check(
-    'DST gaps and ambiguous times fail before bulk changes, and an explicit occurrence is retained',
+    'DST gaps and ambiguous times fail before bulk changes, and valid legacy input expires at the end of that date',
     async ({ repository, db, group, selection }) => {
       const before = await stored(db)
       const request = {
@@ -398,7 +398,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
         randomUUID()
       )
       for (const { account } of result.accounts)
-        assert.equal(account.expiry.at, Date.parse('2027-11-07T06:30:00Z'))
+        assert.equal(account.expiry.at, Date.parse('2027-11-08T05:00:00Z'))
     }
   )
 

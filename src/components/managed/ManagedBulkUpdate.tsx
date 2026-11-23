@@ -9,11 +9,7 @@ import {
   type BulkMembership,
   type GroupMemberSelection,
 } from '@/api/managed'
-import {
-  expiryChoices,
-  resolveExpiry,
-  MEMBERSHIP_TIMEZONE,
-} from '../../../shared/membership-expiry.js'
+import { resolveExpiryDate, MEMBERSHIP_TIMEZONE } from '../../../shared/membership-expiry.js'
 import { GroupMemberDialog } from './GroupMemberDialog'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
 
@@ -48,11 +44,10 @@ export function ManagedBulkUpdate({
   const [mode, setMode] = useState<'term' | 'lifetime'>(
     original?.membershipType === 'lifetime' ? 'lifetime' : 'term'
   )
-  const [local, setLocal] = useState(original?.expiry?.local ?? '')
+  const [local, setLocal] = useState(original?.expiry?.local.slice(0, 10) ?? '')
   const [timezone, setTimezone] = useState<string>(
     original?.expiry?.timezone ?? MEMBERSHIP_TIMEZONE
   )
-  const [offset, setOffset] = useState<number | undefined>(original?.expiry?.offset)
   const [destination, setDestination] = useState(
     edit === 'move' ? (original?.groupId ?? 'individual') : ''
   )
@@ -67,8 +62,7 @@ export function ManagedBulkUpdate({
       ).supportedValuesOf?.('timeZone') ?? []
     return [...new Set([MEMBERSHIP_TIMEZONE, 'UTC', timezone, ...supported])].sort()
   }, [timezone])
-  const choices = useMemo(() => expiryChoices(local, timezone), [local, timezone])
-  const resolved = useMemo(() => resolveExpiry(local, offset, timezone), [local, offset, timezone])
+  const resolved = useMemo(() => resolveExpiryDate(local, timezone), [local, timezone])
   const active = accounts.filter((account) => account.state === 'active')
   useEffect(() => {
     if (kind !== 'move') return
@@ -169,10 +163,7 @@ export function ManagedBulkUpdate({
       void mutation.submit({
         kind,
         accounts: selection,
-        membership:
-          mode === 'lifetime'
-            ? { mode }
-            : { mode, local, timezone, offset: resolved.ok ? resolved.expiry.offset : undefined },
+        membership: mode === 'lifetime' ? { mode } : { mode, local, timezone },
       })
     } else if (kind === 'move')
       if (edit && destination === 'individual')
@@ -235,7 +226,7 @@ export function ManagedBulkUpdate({
                   value={mode}
                   onChange={(event) => setMode(event.target.value as typeof mode)}
                 >
-                  <option value="term">Expiry date and time</option>
+                  <option value="term">Expiry date</option>
                   <option value="lifetime">Lifetime</option>
                 </select>
               </label>
@@ -249,10 +240,7 @@ export function ManagedBulkUpdate({
                       list="member-bulk-timezones"
                       value={timezone}
                       required
-                      onChange={(event) => {
-                        setTimezone(event.target.value)
-                        setOffset(undefined)
-                      }}
+                      onChange={(event) => setTimezone(event.target.value)}
                     />
                     <datalist id="member-bulk-timezones">
                       {zones.map((zone) => (
@@ -261,58 +249,29 @@ export function ManagedBulkUpdate({
                     </datalist>
                   </label>
                   <label className="block space-y-1 text-sm" htmlFor="member-bulk-cutoff">
-                    <span>Expiry date and time</span>
+                    <span>Expiry date</span>
                     <input
                       id="member-bulk-cutoff"
                       className={field}
-                      type="datetime-local"
-                      step="60"
-                      min="1900-01-01T00:00"
-                      max="9999-12-31T23:59"
+                      type="date"
+                      min="1900-01-01"
+                      max="9999-12-31"
                       value={local}
                       required
-                      onChange={(event) => {
-                        setLocal(event.target.value)
-                        setOffset(undefined)
-                      }}
+                      onChange={(event) => setLocal(event.target.value)}
                     />
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    {edit
-                      ? 'Uses the chosen timezone.'
-                      : 'All selected accounts get this cutoff in the chosen timezone.'}
+                    Membership stays active through the end of this date in the selected timezone.
                   </p>
-                  {local && !choices.ok && (
+                  {local && !resolved.ok && (
                     <p role="alert" className="text-sm text-destructive">
-                      {choices.code === 'NONEXISTENT_EXPIRY'
-                        ? 'This time does not exist because the clocks move forward. Choose another time.'
-                        : choices.code === 'INVALID_TIMEZONE'
+                      {resolved.code === 'NONEXISTENT_EXPIRY'
+                        ? 'This date does not exist in the selected timezone.'
+                        : resolved.code === 'INVALID_TIMEZONE'
                           ? 'Enter a valid named timezone.'
-                          : 'Enter a valid date and time.'}
+                          : 'Enter a valid date.'}
                     </p>
-                  )}
-                  {choices.ok && choices.choices.length > 1 && (
-                    <label className="block space-y-1 text-sm" htmlFor="member-bulk-occurrence">
-                      <span>This time occurs twice. Choose an occurrence.</span>
-                      <select
-                        id="member-bulk-occurrence"
-                        className={field}
-                        required
-                        value={offset ?? ''}
-                        onChange={(event) =>
-                          setOffset(
-                            event.target.value === '' ? undefined : Number(event.target.value)
-                          )
-                        }
-                      >
-                        <option value="">Choose an occurrence</option>
-                        {choices.choices.map((choice) => (
-                          <option key={choice.offset} value={choice.offset}>
-                            {choice.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
                   )}
                   {resolved.ok && resolved.expiry.at <= Date.now() && (
                     <p role="status" className="text-sm text-amber-500">

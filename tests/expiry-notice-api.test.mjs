@@ -94,9 +94,13 @@ test('public expiry addon serves a card and source notice without account data; 
       'series/tt0123456:1:2',
     ]) {
       const streams = (await get(`${base}/stream/${resource}.json`)).json().streams
-      assert.equal(streams.length, 1)
-      assert.equal(streams[0].externalUrl, `https://manager.example.invalid${base}/renew`)
-      assert.equal(Object.hasOwn(streams[0], 'url'), false)
+      assert.deepEqual(streams, [
+        {
+          name: 'Membership expired',
+          description: settings.message,
+          externalUrl: `https://manager.example.invalid${base}/renew`,
+        },
+      ])
     }
     const landing = await get(`${base}/renew`)
     assert.equal(landing.body.includes('<script>'), false)
@@ -141,7 +145,7 @@ test('public expiry addon serves a card and source notice without account data; 
       const [stream] = (await get(`${base}/stream/${path}.json`)).json().streams
       assert.equal(stream.name, label)
       assert.equal(stream.description, card.description)
-      assert.equal(stream.title, card.description)
+      assert.equal(Object.hasOwn(stream, 'title'), false)
       assert.equal(stream.externalUrl, renewalUrl)
     }
     await post('/api/managed/expiry-notice', {

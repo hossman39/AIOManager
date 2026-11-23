@@ -55,9 +55,9 @@ account's addon configuration also requires `accounts:write` and
    records retain reservations so a retry cannot resurrect the account.
 4. Set membership with `POST /accounts/{id}/membership`. Use `expectedVersion`
    from the latest account and either `mode: "lifetime"` or `mode: "term"`,
-   `local`, `timezone`, and optional `offset` (UTC minutes). A future date renews;
-   a past date expires. Nonexistent wall times are rejected; repeated wall times
-   need their explicit offset. Default timezone is America/New_York.
+   `local` as an inclusive YYYY-MM-DD date, and an optional IANA `timezone`
+   (default America/New_York). Access expires when that local date ends. Older
+   clients can still submit a valid local date and time with its optional offset.
 5. Assign a published group through `POST /accounts/assign-group`, or save an
    individual setup through `POST /accounts/{id}/addons`. Group operations keep
    staging passive. Addon changes preserve the same protection and expiry rules
@@ -75,7 +75,7 @@ account's addon configuration also requires `accounts:write` and
 Example membership body:
 
 ```json
-{"expectedVersion": 3, "mode": "term", "local": "2027-01-15T18:00", "timezone": "America/New_York"}
+{"expectedVersion": 3, "mode": "term", "local": "2027-01-15", "timezone": "America/New_York"}
 ```
 
 Group create/publish, bulk membership/sync, account renaming, password repair,

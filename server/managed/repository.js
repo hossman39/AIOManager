@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { createExpiryNoticeRepository } from './expiry-notice.js'
 import { z } from 'zod'
 import { parseCredentialImport } from '../../shared/credential-import.js'
-import { resolveExpiry, MEMBERSHIP_TIMEZONE } from '../../shared/membership-expiry.js'
+import {
+  resolveExpiry,
+  resolveExpiryDate,
+  MEMBERSHIP_TIMEZONE,
+} from '../../shared/membership-expiry.js'
 import { authenticateManager } from './auth.js'
 import { equalSecret } from './crypto.js'
 import { ManagedError } from './errors.js'
@@ -38,6 +42,16 @@ const bulkMembershipSchema = z.strictObject({
 
 export function parseImportBody(body) {
   return parseCredentialImport(JSON.stringify(body))
+}
+
+function membershipDeadline({ local, offset, timezone }) {
+  // Older clients submit a wall time. Preserve their validation and use the date they selected.
+  if (local.includes('T')) {
+    const legacy = resolveExpiry(local, offset, timezone)
+    if (!legacy.ok) return legacy
+    local = local.slice(0, 10)
+  }
+  return resolveExpiryDate(local, timezone)
 }
 
 /** Staging cannot activate; only publication preparation may invoke a trusted manifest validator. */
@@ -166,11 +180,7 @@ export function createManagedRepository({
     value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     let expiry = null
     if (value.membership.mode === 'term') {
-      const resolved = resolveExpiry(
-        value.membership.local,
-        value.membership.offset,
-        value.membership.timezone
-      )
+      const resolved = membershipDeadline(value.membership)
       if (!resolved.ok) throw new ManagedError(resolved.code)
       expiry = resolved.expiry
     }
@@ -276,7 +286,7 @@ export function createManagedRepository({
             },
       safeMode: row.safe_mode === null ? null : row.safe_mode === 1,
       accessOverride: row.access_override ?? 'automatic',
-      suspendedAt: row.access_override === 'active' ? null : row.suspended_at ?? null,
+      suspendedAt: row.access_override === 'active' ? null : (row.suspended_at ?? null),
       expired: row.state === 'active' && currentAccountTarget(row, now()) === 'suspended',
       appliedVersion: row.applied_version,
       appliedTarget: row.applied_target,
@@ -413,7 +423,7 @@ export function createManagedRepository({
       if (!parsed.success) throw new ManagedError('INVALID_INPUT')
       let expiry = null
       if (parsed.data.mode === 'term') {
-        const resolved = resolveExpiry(parsed.data.local, parsed.data.offset, parsed.data.timezone)
+        const resolved = membershipDeadline(parsed.data)
         if (!resolved.ok) throw new ManagedError(resolved.code)
         const { at, local, offset, timezone } = resolved.expiry
         expiry = { at, local, offset, timezone }

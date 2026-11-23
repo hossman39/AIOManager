@@ -124,9 +124,9 @@ outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
    still open its manual addon controls; **Save Stremio login** enables unattended
    sync, groups and expiry.
 3. Open **Membership**. New dated memberships default to `America/New_York`.
-   Select or type another IANA timezone, enter its local cutoff and save. Reopen
-   to confirm the chosen zone. Nonexistent clock-change times are rejected;
-   repeated times require an explicit occurrence. Lifetime is a separate choice.
+   Select the last date of access and save. Reopen to confirm the date and timezone.
+   A dated membership stays active through that local day, including clock changes.
+   Lifetime is a separate choice.
 4. Open **Sync & access**, choose **Preview first sync**, review the addon list,
    confirm it and choose **Start sync**. No group is required. If paused, open
    **Settings → Account sync** and resume sync. Wait for **verified** in

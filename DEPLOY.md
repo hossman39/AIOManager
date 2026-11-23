@@ -4,19 +4,23 @@ Release images belong to `ghcr.io/hossman39/aiomanager`. Use the image digest or
 `sha-<full-commit>` from the tested release. Never substitute the original upstream
 image for this fork or use an unattended `latest` update.
 
-## Nuvio rollout with 2.2.0
+## Upgrade to 2.3.0
 
 Pull the public image from the fork. Docker selects AMD64 or ARM64 for your host.
 
 ```sh
-docker pull ghcr.io/hossman39/aiomanager:2.2.0
+docker pull ghcr.io/hossman39/aiomanager:2.3.0
 ```
 
-Use `ghcr.io/hossman39/aiomanager:2.2.0` as the image in your existing Portainer
+Use `ghcr.io/hossman39/aiomanager:2.3.0` as the image in your existing Portainer
 stack. To pin the exact build, use the full `ghcr.io/...` value of
 `AIOMANAGER_IMAGE` in [.env.example](.env.example). If your stack already uses
 that variable, update its value in Portainer. Follow the backup and upgrade
 steps below before redeploying.
+
+On first start, dated memberships migrate automatically to the end of their saved
+local date. An automatic suspension earlier that day queues a restoration through
+managed sync. Manual access overrides continue to apply.
 
 ## Previous releases
 
@@ -25,6 +29,7 @@ changed, restore the matching pre-upgrade database and encryption key with it.
 
 | Version | Build commit | Image |
 | --- | --- | --- |
+| 2.2.0 | `0e5301f` | `ghcr.io/hossman39/aiomanager@sha256:fb8f40f20264c33cbde665330bb3f318075f613ebedac4222cc8b5a82ba613b3` |
 | 2.1.0 | `9c13184` | `ghcr.io/hossman39/aiomanager@sha256:ef17a0333f627c00af87da4c128fe891c61249eeb4af28d53a1c6b9b13848ecc` |
 | 2.0.0 | `67395d1` | `ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c` |
 
@@ -119,7 +124,7 @@ required for encryption keys and application archives with either database engin
 
 ## Live acceptance
 
-- Health succeeds through the final HTTPS hostname. The footer shows `2.2.0` and
+- Health succeeds through the final HTTPS hostname. The footer shows `2.3.0` and
   the build commit from the release.
 - Existing accounts, memberships and groups are present after a container restart.
 - A dedicated Nuvio profile receives the correct group. Under **Follow membership**,

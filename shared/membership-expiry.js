@@ -106,3 +106,29 @@ export function resolveExpiry(local, offset, timezone = MEMBERSHIP_TIMEZONE) {
       : result.choices.find((choice) => choice.offset === offset)
   return selected ? { ok: true, expiry: selected } : { ok: false, code: 'INVALID_EXPIRY' }
 }
+
+/** Exclusive cutoff after the last instant of the selected local calendar day. */
+export function resolveExpiryDate(date, timezone = MEMBERSHIP_TIMEZONE) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date))
+    return { ok: false, code: 'INVALID_EXPIRY' }
+  const end = expiryChoices(`${date}T23:59`, timezone)
+  if (!end.ok && end.code !== 'NONEXISTENT_EXPIRY') return end
+  const zone = formatter(timezone)
+  const nextDay = Date.parse(`${date}T00:00:00Z`) + 86_400_000
+  // Start at the last occurrence if the final hour repeats. If a clock jump
+  // skips the final minute, locate the transition using the actual zone rules.
+  let low = end.ok ? end.choices.at(-1).at : nextDay - 2 * 86_400_000
+  let high = end.ok ? low + 60_000 : nextDay + 2 * 86_400_000
+  while (high - low > 1000) {
+    const middle = low + Math.floor((high - low) / 2000) * 1000
+    if (partsAt(zone, middle).utc < nextDay) low = middle
+    else high = middle
+  }
+  const last = partsAt(zone, high - 1000)
+  if (last.local.slice(0, 10) !== date) return { ok: false, code: 'NONEXISTENT_EXPIRY' }
+  const offset = (last.utc - (high - 1000)) / 60_000
+  return {
+    ok: true,
+    expiry: { at: high, local: date, timezone, offset, label: offsetLabel(offset) },
+  }
+}

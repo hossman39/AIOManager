@@ -31,8 +31,7 @@ export function membershipLabel(account: ManagedAccount) {
   return (
     new Intl.DateTimeFormat(undefined, {
       dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZone: account.expiry.timezone,
-    }).format(account.expiry.at) + ` (${account.expiry.timezone})`
+      timeZone: 'UTC',
+    }).format(new Date(account.expiry.local.slice(0, 10))) + ` (${account.expiry.timezone})`
   )
 }

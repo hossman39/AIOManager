@@ -3,7 +3,7 @@
   "info": {
     "title": "AIOManager integration API",
     "version": "1.0.0",
-    "description": "Application 2.2.0. All timestamps are Unix milliseconds; membership also includes local wall time and IANA timezone. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
+    "description": "Application 2.3.0. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the saved IANA timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
   },
   "servers": [
     {
@@ -324,7 +324,7 @@
               "local": {
                 "type": "string",
                 "examples": [
-                  "2027-01-15T18:00"
+                  "2027-01-15"
                 ]
               },
               "timezone": {
@@ -335,7 +335,7 @@
               },
               "offset": {
                 "type": "number",
-                "description": "UTC offset in minutes; supply to disambiguate a repeated local time."
+                "description": "Optional for legacy date-time requests to disambiguate a repeated local time."
               }
             },
             "required": [
@@ -396,7 +396,7 @@
                   "local": {
                     "type": "string",
                     "examples": [
-                      "2027-01-15T18:00"
+                      "2027-01-15"
                     ]
                   },
                   "timezone": {
@@ -407,7 +407,7 @@
                   },
                   "offset": {
                     "type": "number",
-                    "description": "UTC offset in minutes; supply to disambiguate a repeated local time."
+                    "description": "Optional for legacy date-time requests to disambiguate a repeated local time."
                   }
                 },
                 "required": [
