@@ -38,6 +38,9 @@ test('signup without a session prompts for email confirmation', async () => {
 test('SQLite Nuvio enrollment, membership migration, scheduled expiry, renewal and watch history', () =>
   nuvioLifecycle())
 
+test('SQLite converts saved Stremio credentials, resumes confirmation and imports from a one-time login', () =>
+  nuvioLifecycle(undefined, true))
+
 test('Stremio episode flags retain their anchor when episodes are added; incomplete metadata is reported', async () => {
   const id = 'tt123'
   const videos = [0, 1, 2, 3].map((n) => ({ id: id + ':1:' + n, season: 1, episode: n }))

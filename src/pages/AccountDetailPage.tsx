@@ -23,6 +23,7 @@ import { accountStatus, membershipLabel } from '@/components/managed/account-lab
 import { useUIStore } from '@/store/uiStore'
 import { sameAddonSetup } from '../../shared/account-addons.js'
 import { NuvioHistory } from '@/components/managed/NuvioHistory'
+import { ConvertToNuvio } from '@/components/managed/ConvertToNuvio'
 import type { ManagedAddon } from '../../shared/addon-config.js'
 import { isExpiryNotice } from '../../shared/expiry-notice.js'
 
@@ -156,7 +157,12 @@ function AccountWorkspace({ api, id }: { api: Api; id: string }) {
             {membershipLabel(account)}
           </p>
         </div>
-        <span className="rounded-full border px-3 py-1 text-xs">{accountStatus(account)}</span>
+        <div className="flex items-center gap-2">
+          {!account.platform && account.state !== 'offboarding' && (
+            <ConvertToNuvio api={api} account={account} />
+          )}
+          <span className="rounded-full border px-3 py-1 text-xs">{accountStatus(account)}</span>
+        </div>
       </div>
       {status?.writePaused && (
         <p className="rounded-lg border border-amber-500/30 p-3 text-sm">

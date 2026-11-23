@@ -105,6 +105,17 @@ export function createNuvioProvider({
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
       if (!response.ok) {
+        if (
+          options.registerIfMissing &&
+          path.startsWith('/auth/v1/token') &&
+          response.status === 400
+        ) {
+          const failure = await boundedJson(response, 16_384)
+          const code = failure?.error_code ?? failure?.code
+          if (code === 'email_not_confirmed') throw new ManagedError('NUVIO_CONFIRM_EMAIL')
+          if (code === 'invalid_credentials') throw new ManagedError('INVALID_CREDENTIALS')
+          throw new ProviderFailure('INVALID_STATE')
+        }
         await response.body?.cancel()
         if (response.status === 429)
           throw new ProviderFailure(
@@ -195,6 +206,18 @@ export function createNuvioProvider({
     await login(session, options)
     return (await access(session, options)).token
   }
+  async function register(credentials, options) {
+    const data = await call(
+      '/auth/v1/signup',
+      null,
+      {
+        email: credentials.email,
+        password: credentials.password,
+      },
+      options
+    )
+    if (!data?.access_token) throw new ManagedError('NUVIO_CONFIRM_EMAIL')
+  }
   return {
     inspect,
     login,
@@ -209,14 +232,15 @@ export function createNuvioProvider({
       )
     },
     normalizeCollection: nuvioCollection,
-    async register(credentials, options) {
-      const data = await call(
-        '/auth/v1/signup',
-        null,
-        { email: credentials.email, password: credentials.password },
-        options
-      )
-      if (!data?.access_token) throw new ManagedError('NUVIO_CONFIRM_EMAIL')
+    register,
+    async connectOrRegister(credentials, options) {
+      try {
+        await access(credentials, { ...options, registerIfMissing: true })
+      } catch (error) {
+        if (!(error instanceof ManagedError) || error.code !== 'INVALID_CREDENTIALS') throw error
+        await register(credentials, options)
+      }
+      return login(credentials, options)
     },
     async getIdentity(session, options) {
       return (await login(session, options)).id

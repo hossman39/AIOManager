@@ -3,7 +3,7 @@
   "info": {
     "title": "AIOManager integration API",
     "version": "1.0.0",
-    "description": "Application 2.1.0. All timestamps are Unix milliseconds; membership also includes local wall time and IANA timezone. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
+    "description": "Application 2.2.0. All timestamps are Unix milliseconds; membership also includes local wall time and IANA timezone. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
   },
   "servers": [
     {

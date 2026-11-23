@@ -578,9 +578,27 @@ export function createManagedApi({
       request('/accounts/' + encodeURIComponent(id) + '/history/profiles', nuvioProfilesSchema, {
         signal,
       }),
-    historyPreview: (id: string, sourceId: string, profileId: number, signal?: AbortSignal) =>
+    convertToNuvio: (id: string, expectedVersion: number, key: string) =>
+      request(
+        '/accounts/' + encodeURIComponent(id) + '/convert-to-nuvio',
+        z.object({ account: accountSchema, keptSetup: z.boolean().optional() }),
+        {
+          body: { expectedVersion },
+          key,
+          timeoutMs: 120_000,
+        }
+      ),
+    historyPreview: (
+      id: string,
+      source: string | { email: string; password: string },
+      profileId: number,
+      signal?: AbortSignal
+    ) =>
       request('/accounts/' + encodeURIComponent(id) + '/history/preview', historyPreviewSchema, {
-        body: { sourceId, profileId },
+        body:
+          typeof source === 'string'
+            ? { sourceId: source, profileId }
+            : { login: source, profileId },
         signal,
         timeoutMs: 200_000,
       }),

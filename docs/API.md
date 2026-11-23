@@ -5,7 +5,7 @@ The app manages Stremio account configurations and membership access. It does no
 purchase IPTV lines, debrid subscriptions, or TiviMate licenses and has no credit
 balance or charges. TV Box Manager should keep those providers as separate adapters.
 
-In 2.1.0, create or connect Nuvio profiles in the dashboard. To manage a profile's
+Create or connect Nuvio profiles in the dashboard. To manage a profile's
 membership from an integration, link its existing AIOManager account ID to the
 client's external reference. The v1 account creation endpoint stages Stremio
 accounts. Nuvio signup, profile selection and watch-history import use the dashboard.

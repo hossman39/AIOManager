@@ -90,7 +90,10 @@ export async function registerManagedRoutes(app, repository, manifestService) {
       routes.get('/accounts/:id/history/profiles', (r) =>
         repository.historyProfiles(r.managedAuth, r.params.id)
       )
-      routes.post('/accounts/:id/history/preview', { bodyLimit: 4096 }, (r, reply) =>
+      routes.post('/accounts/:id/convert-to-nuvio', { bodyLimit: 4096 }, (r) =>
+        repository.convertToNuvio(r.managedAuth, r.params.id, r.body, r.headers['idempotency-key'])
+      )
+      routes.post('/accounts/:id/history/preview', { bodyLimit: 32768 }, (r, reply) =>
         cancelReadOnDisconnect(r, reply, (signal) =>
           repository.previewNuvioHistory(r.managedAuth, r.params.id, r.body, { signal })
         )

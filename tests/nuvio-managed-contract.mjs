@@ -20,7 +20,8 @@ const manifest = {
   catalogs: [],
 }
 
-function fakeNuvio() {
+function fakeNuvio(converting) {
+  const registration = { status: converting ? 'new' : 'ready', attempts: 0 }
   const user = { id: randomUUID(), email: login.email }
   const profiles = [1, 2, 3].map((slot) => ({
     profile_index: slot,
@@ -42,6 +43,19 @@ function fakeNuvio() {
     if (pathname === '/auth/v1/signup' || pathname === '/auth/v1/token') {
       if (body.email !== login.email || body.password !== login.password)
         return new Response(null, { status: 400 })
+      if (converting && pathname === '/auth/v1/signup') {
+        registration.attempts++
+        registration.status = 'pending'
+        return Response.json({ user })
+      }
+      if (registration.status !== 'ready')
+        return Response.json(
+          {
+            error_code:
+              registration.status === 'new' ? 'invalid_credentials' : 'email_not_confirmed',
+          },
+          { status: 400 }
+        )
       return Response.json({ user, access_token: 'test-token', expires_in: 3600 })
     }
     assert.equal(options.headers.Authorization, 'Bearer test-token')
@@ -52,7 +66,7 @@ function fakeNuvio() {
       addons.set(body.p_profile_id, body.p_addons)
       writes.push(pathname)
     } else {
-      assert.equal(body.p_profile_id, 2)
+      assert.equal(body.p_profile_id, converting ? 1 : 2)
       if (pathname.endsWith('/sync_pull_watch_progress')) {
         assert.deepEqual(Object.keys(body).sort(), [
           'p_limit',
@@ -77,13 +91,28 @@ function fakeNuvio() {
     }
     return new Response(null, { status: 204 })
   }
-  return { transport, profiles, addons, watched, progress, writes }
+  return { transport, profiles, addons, watched, progress, writes, registration }
 }
 
-export async function nuvioLifecycle(database) {
+export async function nuvioLifecycle(database, converting = false) {
   const directory = await mkdtemp(path.join(tmpdir(), 'aiomanager-nuvio-'))
-  const nuvio = fakeNuvio()
-  const stremio = fakeStremio([login])
+  const nuvio = fakeNuvio(converting)
+  const otherLogin = { email: 'external@example.invalid', password: 'external-fixture-only' }
+  const stremio = fakeStremio([
+    {
+      ...login,
+      addons: converting
+        ? [
+            { transportUrl: hosted + '/manifest.json', manifest },
+            {
+              transportUrl: 'http://127.0.0.1:11470/local-addon/manifest.json',
+              manifest: { ...manifest, id: 'local-files' },
+            },
+          ]
+        : [],
+    },
+    otherLogin,
+  ])
   const date = '2026-01-01T20:00:00Z'
   const items = [
     { _id: 'tt1', type: 'movie', name: 'Finished', state: { timesWatched: 1, lastWatched: date } },
@@ -141,12 +170,84 @@ export async function nuvioLifecycle(database) {
     assert.equal(paused.capabilities.providerWrites, true)
     assert.equal(paused.ownerWritePaused, true)
     await request(prefix + '/nuvio/register', login, 409)
-    assert.equal((await request(prefix + '/nuvio/profiles', login)).profiles.length, 3)
+    if (!converting)
+      assert.equal((await request(prefix + '/nuvio/profiles', login)).profiles.length, 3)
     await request(prefix + '/settings', {
       expectedVersion: paused.version,
       writePaused: false,
       safeMode: paused.safeMode,
     })
+    if (converting) {
+      const source = (
+        await request(prefix + '/accounts/connect', {
+          accounts: [{ ...login, name: 'Customer', localId: 'original' }],
+        })
+      ).connections[0].account
+      const base = prefix + '/accounts/' + source.id
+      const { account: original } = await request(base + '/membership', {
+        expectedVersion: source.version,
+        mode: 'lifetime',
+      })
+      const convert = base + '/convert-to-nuvio'
+      const input = { expectedVersion: original.version }
+      await request(convert, { expectedVersion: source.version }, 409)
+      assert.equal(nuvio.registration.attempts, 0)
+      for (let pass = 0; pass < 2; pass++)
+        assert.equal((await request(convert, input, 409)).error.code, 'NUVIO_CONFIRM_EMAIL')
+      assert.equal(nuvio.registration.attempts, 1)
+      nuvio.registration.status = 'ready'
+      const [first, retry] = await Promise.all([request(convert, input), request(convert, input)])
+      assert.deepEqual(retry, first)
+      const target = first.account
+      assert.notEqual(target.id, source.id)
+      assert.equal(target.email, login.email)
+      assert.equal(target.profileId, 1)
+      assert.equal(target.membershipType, 'lifetime')
+      assert.doesNotMatch(JSON.stringify(first), /only-for-fixtures|test-token/)
+      const dest = prefix + '/accounts/' + target.id
+      const addons = await request(dest + '/addons')
+      assert.deepEqual(
+        addons.addons.map((a) => a.transportUrl),
+        [hosted + '/manifest.json']
+      )
+      const activation = await request(dest + '/activation-preview', {
+        expectedVersion: target.version,
+        safeMode: target.safeMode,
+      })
+      await request(dest + '/activate', {
+        expectedVersion: target.version,
+        receipt: activation.receipt,
+      })
+      assert.equal((await app.managedRuntime.runOnce()).state, 'verified')
+      assert.deepEqual((await request(convert, input)).account, await request(dest))
+      await request(
+        dest + '/history/preview',
+        { sourceId: source.id, login: otherLogin, profileId: 1 },
+        400
+      )
+      await request(
+        dest + '/history/preview',
+        { login: { ...otherLogin, password: 'wrong' }, profileId: 1 },
+        422
+      )
+      const external = await request(dest + '/history/preview', { login: otherLogin, profileId: 1 })
+      assert.equal(external.watched, 1)
+      assert.equal(external.progress, 2)
+      const read = stremio.calls.filter((c) => c.type === 'Auth').at(-1)
+      assert.equal(read.body.email, otherLogin.email)
+      assert.equal(
+        (await request(dest + '/history/import', { preview: external.preview })).watched,
+        1
+      )
+      const again = await request(dest + '/history/preview', { sourceId: source.id, profileId: 1 })
+      assert.equal(again.progress + again.watched, 0)
+      assert.equal((await request(prefix + '/accounts')).accounts.length, 2)
+      assert.deepEqual(await request(base), original)
+      assert.ok(
+        stremio.calls.every((c) => !['DatastorePut', 'AddonCollectionSet'].includes(c.type))
+      )
+      return
+    }
     assert.equal((await request(prefix + '/nuvio/register', login)).profiles[1].inherits, true)
     await request(prefix + '/nuvio/connect', { ...login, name: 'Shared', profileId: 2 }, 409)
     const { account } = await request(prefix + '/nuvio/connect', {
@@ -303,6 +404,11 @@ export async function nuvioLifecycle(database) {
     await request(base + '/history/import', { preview: beforeReplacement.preview }, 409)
 
     const sourceBase = prefix + '/accounts/' + source.id
+    const kept = await request(sourceBase + '/convert-to-nuvio', {
+      expectedVersion: (await request(sourceBase)).version,
+    })
+    assert.equal(kept.keptSetup, true)
+    assert.equal(kept.account.id, account.id)
     await request(prefix + '/accounts/assign-group', {
       groupId: group.id,
       accounts: [{ id: source.id, expectedVersion: source.version }],

@@ -55,6 +55,10 @@ async function fixture(t) {
   return db
 }
 
+test('PostgreSQL Nuvio conversion and one-time history import', options, async (t) =>
+  nuvioLifecycle(await fixture(t), true)
+)
+
 test('PostgreSQL Nuvio enrollment, membership migration, scheduled expiry, renewal and watch history',
   options, async (t) => nuvioLifecycle(await fixture(t))
 )

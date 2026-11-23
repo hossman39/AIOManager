@@ -5,19 +5,31 @@ import { profileNumber } from './nuvio.js'
 import { historyCandidates, confirmHistory, mergeHistory, readHistory } from './nuvio-history.js'
 import { providerIdentityKey } from './execution.js'
 import { equalSecret } from './crypto.js'
+import { isExpiryNotice } from '../../shared/expiry-notice.js'
+import { readAccountSetup } from './account-setup.js'
 import { lockAccountSelection } from './group-members.js'
 
 const loginBody = z.strictObject({
   email: z.email().max(254),
   password: z.string().min(1).max(4096),
 })
-const historyBody = z.strictObject({ sourceId: z.uuid(), profileId: profileNumber })
+const historyBody = z.union([
+  z.strictObject({ sourceId: z.uuid(), profileId: profileNumber }),
+  z.strictObject({ login: loginBody, profileId: profileNumber }),
+])
 const parse = (schema, value) => {
   const result = schema.safeParse(value)
   if (!result.success) throw new ManagedError('INVALID_INPUT')
   return result.data
 }
 const binding = (owner, id, purpose) => ({ owner, id, purpose })
+function isStremioLocalFiles(url) {
+  const { hostname, pathname } = new URL(url)
+  return (
+    ['127.0.0.1', 'localhost', '[::1]'].includes(hostname) &&
+    /^\/local-addon(?:\/manifest\.json)?\/?$/.test(pathname)
+  )
+}
 export function createNuvioAccounts({
   db,
   crypto,
@@ -65,6 +77,168 @@ export function createNuvioAccounts({
     if (!profile) throw new ManagedError('NUVIO_PROFILE')
     return { token: info.token, profileKey: info.userId + ':' + (profile.id ?? 'primary') }
   }
+  async function stremioSession(row, login, options) {
+    if (login.platform === 'nuvio') throw new ManagedError('INVALID_INPUT')
+    const session = await runtime.provider.login(login, options)
+    if (
+      session.email.toLowerCase() !== login.email.toLowerCase() ||
+      (row?.provider_key && !equalSecret(row.provider_key, providerIdentityKey(crypto, session.id)))
+    )
+      throw new ManagedError('IDENTITY_MISMATCH')
+    return session
+  }
+  async function storeProfile(auth, owner, value, session, key, conversion) {
+    return ownerTransaction(auth, (tx, currentOwner, settings, at) =>
+      idempotent(
+        tx,
+        currentOwner,
+        conversion ? 'accounts.nuvio-convert' : 'accounts.nuvio-connect',
+        key,
+        value,
+        at,
+        async () => {
+          if (conversion && settings.write_paused !== 0) throw new ManagedError('WRITE_PAUSED')
+          const emailKey = crypto.fingerprint(
+            [value.email.toLowerCase(), value.profileId],
+            binding(owner, 'nuvio-email', 'lookup')
+          )
+          const existing = await tx.get(
+            'SELECT * FROM managed_accounts WHERE owner_id=$1 AND email_key=$2',
+            [owner, emailKey]
+          )
+          if (existing) {
+            if (credentials(existing).id !== session.id) throw new ManagedError('IDENTITY_MISMATCH')
+            if (existing.state === 'offboarding') throw new ManagedError('INVALID_STATE')
+            if (!conversion) {
+              if (value.copyFrom) throw new ManagedError('ACCOUNT_EXISTS')
+              return { account: publicAccount(existing) }
+            }
+            if (credentials(existing).convertedFrom === value.copyFrom.id)
+              return { account: publicAccount(existing) }
+            const target = publicAccount(existing)
+            if (
+              target.version !== 1 ||
+              target.state !== 'staged' ||
+              target.setupSaved ||
+              target.membershipType !== 'unset'
+            )
+              return { account: target, keptSetup: true }
+          }
+          const providerKey = providerIdentityKey(crypto, session.id, 'nuvio')
+          if (
+            await tx.get('SELECT account_id FROM managed_offboarded WHERE provider_key=$1', [
+              providerKey,
+            ])
+          )
+            throw new ManagedError('MANAGED_ACCOUNT')
+          if (
+            conversion &&
+            (await tx.get('SELECT id FROM managed_accounts WHERE provider_key=$1', [providerKey]))
+          )
+            throw new ManagedError('MANAGED_ACCOUNT')
+          const id = existing?.id ?? randomUUID()
+          const seal = (v, purpose) => crypto.seal(v, binding(owner, id, purpose))
+          const savedLogin = seal(
+            {
+              ...session,
+              name: value.name || value.email,
+              ...(conversion && { convertedFrom: value.copyFrom.id }),
+            },
+            'credentials'
+          )
+          if (existing) {
+            await tx.run(
+              'UPDATE managed_accounts SET credentials_enc=$1, record_version=record_version+1, policy_version=policy_version+1, updated_at=$2 WHERE id=$3',
+              [savedLogin, at, id]
+            )
+          } else {
+            await tx.run(
+              `INSERT INTO managed_accounts
+              (id,owner_id,email_key,credentials_enc,personal_enc,configuration_enc,created_at,updated_at)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`,
+              [
+                id,
+                owner,
+                emailKey,
+                savedLogin,
+                seal([], 'personal-addons'),
+                seal([], 'configuration'),
+                at,
+              ]
+            )
+          }
+          if (value.copyFrom) {
+            const [source] = await lockAccountSelection(tx, owner, [value.copyFrom])
+            if (credentials(source).platform === 'nuvio') throw new ManagedError('INVALID_INPUT')
+            await tx.run(
+              `UPDATE managed_accounts AS dest SET
+               group_id = src.group_id, group_sync_requested = CASE WHEN src.group_id IS NULL THEN 0 ELSE 1 END,
+               lifetime = src.lifetime, expiry_at = src.expiry_at, expiry_local = src.expiry_local,
+               expiry_offset = src.expiry_offset, expiry_timezone = src.expiry_timezone,
+               expiry_zone = src.expiry_zone, expiry_zone_offset = src.expiry_zone_offset,
+               access_override = src.access_override, suspended_at = src.suspended_at
+             FROM managed_accounts AS src
+             WHERE dest.id = $1 AND src.id = $2 AND dest.owner_id = $3 AND src.owner_id = $3`,
+              [id, source.id, owner]
+            )
+            if (conversion) {
+              const setup = await readAccountSetup(tx, source, crypto)
+              const portable = (addons) =>
+                addons.filter(
+                  (addon) => !isStremioLocalFiles(addon.transportUrl) && !isExpiryNotice(addon)
+                )
+              const overrides = {
+                ...setup.accountOverrides,
+                addons: portable(setup.accountOverrides.addons),
+                removed: [
+                  ...new Set([
+                    ...setup.accountOverrides.removed,
+                    ...setup.group
+                      .filter((addon) => isStremioLocalFiles(addon.transportUrl))
+                      .map((addon) => addon.transportUrl),
+                  ]),
+                ],
+              }
+              await tx.run(
+                `UPDATE managed_accounts SET personal_enc=$1, addon_overrides_enc=$2,
+                configuration_enc=$3, addons_initialized=$4, safe_mode=$5 WHERE id=$6`,
+                [
+                  seal(portable(conversion.liveAddons ?? setup.personal), 'personal-addons'),
+                  seal(overrides, 'account-addon-overrides'),
+                  seal(portable(setup.saved), 'configuration'),
+                  source.group_id ? source.addons_initialized : 1,
+                  source.safe_mode,
+                  id,
+                ]
+              )
+            }
+            const auditId = randomUUID()
+            await tx.run(
+              'INSERT INTO managed_audit (id,owner_id,event_type,subject_id,detail_enc,created_at) VALUES ($1,$2,$3,$4,$5,$6)',
+              [
+                auditId,
+                owner,
+                'account.membership-copied',
+                id,
+                crypto.seal(
+                  {
+                    sourceId: source.id,
+                    sourceVersion: source.record_version,
+                    groupId: source.group_id,
+                  },
+                  binding(owner, auditId, 'audit')
+                ),
+                at,
+              ]
+            )
+          }
+          const row = await tx.get('SELECT * FROM managed_accounts WHERE id=$1', [id])
+          if (value.copyFrom) await jobs.enqueuePolicyChange(tx, row, 'assignment', at)
+          return { account: publicAccount(row) }
+        }
+      )
+    )
+  }
   return {
     async nuvioProfiles(auth, input, register = false) {
       const owner = await authorize(auth)
@@ -91,83 +265,50 @@ export function createNuvioAccounts({
       const owner = await authorize(auth)
       if (!runtime?.enabled) throw new ManagedError('WRITE_PAUSED')
       const session = await driver.login(value)
-      return ownerTransaction(auth, (tx, currentOwner, _settings, at) =>
-        idempotent(tx, currentOwner, 'accounts.nuvio-connect', key, value, at, async () => {
-          const emailKey = crypto.fingerprint(
-            [value.email.toLowerCase(), value.profileId],
-            binding(owner, 'nuvio-email', 'lookup')
-          )
-          const existing = await tx.get(
-            'SELECT * FROM managed_accounts WHERE owner_id=$1 AND email_key=$2',
-            [owner, emailKey]
-          )
-          if (existing) {
-            if (credentials(existing).id !== session.id) throw new ManagedError('IDENTITY_MISMATCH')
-            if (value.copyFrom) throw new ManagedError('ACCOUNT_EXISTS')
-            return { account: publicAccount(existing) }
-          }
-          const providerKey = providerIdentityKey(crypto, session.id, 'nuvio')
-          if (
-            await tx.get('SELECT account_id FROM managed_offboarded WHERE provider_key=$1', [
-              providerKey,
-            ])
-          )
-            throw new ManagedError('MANAGED_ACCOUNT')
-          const id = randomUUID()
-          const seal = (v, purpose) => crypto.seal(v, binding(owner, id, purpose))
-          await tx.run(
-            `INSERT INTO managed_accounts
-            (id,owner_id,email_key,credentials_enc,personal_enc,configuration_enc,created_at,updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`,
-            [
-              id,
-              owner,
-              emailKey,
-              seal({ ...session, name: value.name || value.email }, 'credentials'),
-              seal([], 'personal-addons'),
-              seal([], 'configuration'),
-              at,
-            ]
-          )
-          if (value.copyFrom) {
-            const [source] = await lockAccountSelection(tx, owner, [value.copyFrom])
-            if (credentials(source).platform === 'nuvio') throw new ManagedError('INVALID_INPUT')
-            await tx.run(
-              `UPDATE managed_accounts AS dest SET
-                 group_id = src.group_id, group_sync_requested = CASE WHEN src.group_id IS NULL THEN 0 ELSE 1 END,
-                 lifetime = src.lifetime, expiry_at = src.expiry_at, expiry_local = src.expiry_local,
-                 expiry_offset = src.expiry_offset, expiry_timezone = src.expiry_timezone,
-                 expiry_zone = src.expiry_zone, expiry_zone_offset = src.expiry_zone_offset,
-                 access_override = src.access_override, suspended_at = src.suspended_at
-               FROM managed_accounts AS src
-               WHERE dest.id = $1 AND src.id = $2 AND dest.owner_id = $3 AND src.owner_id = $3`,
-              [id, source.id, owner]
-            )
-            const auditId = randomUUID()
-            await tx.run(
-              'INSERT INTO managed_audit (id,owner_id,event_type,subject_id,detail_enc,created_at) VALUES ($1,$2,$3,$4,$5,$6)',
-              [
-                auditId,
-                owner,
-                'account.membership-copied',
-                id,
-                crypto.seal(
-                  {
-                    sourceId: source.id,
-                    sourceVersion: source.record_version,
-                    groupId: source.group_id,
-                  },
-                  binding(owner, auditId, 'audit')
-                ),
-                at,
-              ]
-            )
-          }
-          const row = await tx.get('SELECT * FROM managed_accounts WHERE id=$1', [id])
-          if (value.copyFrom) await jobs.enqueuePolicyChange(tx, row, 'assignment', at)
-          return { account: publicAccount(row) }
-        })
+      return storeProfile(auth, owner, value, session, key)
+    },
+    async convertToNuvio(auth, id, input, key) {
+      const owner = await authorize(auth)
+      const { expectedVersion } = parse(
+        z.strictObject({ expectedVersion: z.number().int().positive() }),
+        input
       )
+      if (!runtime?.enabled) throw new ManagedError('WRITE_PAUSED')
+      return runtime.exclusive(async () => {
+        await writable(owner)
+        const source = await account(owner, id)
+        if (source.record_version !== expectedVersion) throw new ManagedError('VERSION_CONFLICT')
+        const login = credentials(source)
+        const from = await stremioSession(source, login)
+        const value = {
+          email: login.email,
+          password: login.password,
+          name: login.name || login.email,
+          profileId: 1,
+          copyFrom: { id, expectedVersion },
+        }
+        const emailKey = crypto.fingerprint(
+          [login.email.toLowerCase(), 1],
+          binding(owner, 'nuvio-email', 'lookup')
+        )
+        const existing = await db.get(
+          'SELECT * FROM managed_accounts WHERE owner_id=$1 AND email_key=$2',
+          [owner, emailKey]
+        )
+        if (existing?.state === 'offboarding') throw new ManagedError('INVALID_STATE')
+        if (existing && credentials(existing).convertedFrom === id)
+          return { account: publicAccount(existing) }
+        let liveAddons
+        if (!source.group_id && !source.addons_initialized && source.state === 'staged') {
+          liveAddons = await runtime.provider.getCollection(from)
+        }
+        const options = { beforeDispatch: () => writable(owner) }
+        const session = existing
+          ? await driver.login(value, options)
+          : await driver.connectOrRegister(value, options)
+        await writable(owner)
+        return storeProfile(auth, owner, value, session, key, { liveAddons })
+      })
     },
     async historyProfiles(auth, id) {
       const owner = await authorize(auth)
@@ -180,17 +321,10 @@ export function createNuvioAccounts({
     async previewNuvioHistory(auth, id, input, { signal } = {}) {
       const owner = await authorize(auth)
       if (!runtime?.enabled) throw new ManagedError('WRITE_PAUSED')
-      const { sourceId, profileId } = parse(historyBody, input)
+      const { sourceId, login, profileId } = parse(historyBody, input)
       const { token, profileKey } = await destination(owner, id, profileId, { signal })
-      const source = await account(owner, sourceId)
-      const login = credentials(source)
-      if (login.platform === 'nuvio') throw new ManagedError('INVALID_INPUT')
-      const session = await runtime.provider.login(login, { signal })
-      if (
-        source.provider_key &&
-        !equalSecret(source.provider_key, providerIdentityKey(crypto, session.id))
-      )
-        throw new ManagedError('IDENTITY_MISMATCH')
+      const source = sourceId ? await account(owner, sourceId) : null
+      const session = await stremioSession(source, source ? credentials(source) : login, { signal })
       const data = await runtime.raw(
         'DatastoreGet',
         { collection: 'libraryItem', all: true, authKey: session.authKey },
@@ -239,7 +373,7 @@ export function createNuvioAccounts({
       }
       async function importEntries() {
         await writable(owner)
-        await account(owner, job.sourceId)
+        if (job.sourceId) await account(owner, job.sourceId)
         const plan = mergeHistory(job.plan, await readHistory(driver, await grant(), job.profileId))
         for (const [rows, method, field] of [
           [plan.watched, 'sync_push_watched_items', 'p_items'],

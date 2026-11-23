@@ -82,15 +82,24 @@ outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
    Verification measures the hosted addon list. Device caches, already issued stream
    URLs, user-installed sources, plugins and unenrolled profiles have their own behavior.
    Enforce expiry at your source server if an issued or cached URL must stop working.
-5. To test history, connect the source Stremio login to this manager. On the Nuvio
-   account open **Sync & access → Import watch history from Stremio**. Select the
-   source and destination profile, preview, then confirm. Check one finished movie,
+5. On the Nuvio account open **Sync & access → Import watch history from Stremio**.
+   Pick a managed Stremio account or choose **Use another login** and enter the
+   source credentials for this import. Select the destination profile, preview,
+   then confirm. Check one finished movie,
    a watched episode and a partially played title on Nuvio. A second preview should
    have nothing to add unless the source or destination changed. Series with a watched
    bitmap need matching IMDb/Cinemeta episode metadata. Unmatched series are listed
    in the preview. Items retain their source content IDs, so choose the same catalog
    identifiers when checking playback on the device. The import copies watch states
    and resume points available through Stremio, with no ongoing cross-service sync.
+6. In **Accounts**, use the **Stremio** and **Nuvio** buttons with the search or
+   membership filters. On a managed Stremio account choose **Convert to Nuvio →
+   Convert and import**. The manager uses the saved login for the primary Nuvio
+   profile and copies the membership, access override, group and portable addon
+   settings. A previously configured Nuvio profile keeps its existing setup.
+   Review the history counts and any unmatched titles. If Nuvio requests email
+   confirmation, confirm the email and choose **Retry conversion**. Both accounts
+   remain available in Accounts.
 
 ## Acceptance walkthrough
 

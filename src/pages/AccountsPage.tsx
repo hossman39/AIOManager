@@ -23,6 +23,7 @@ import { useManagedInventory } from '@/components/managed/useManagedInventory'
 import { useAccountConnections } from '@/components/managed/useAccountConnections'
 import { ManagedBulkUpdate } from '@/components/managed/ManagedBulkUpdate'
 import { AccountNameEditor } from '@/components/managed/AccountNameEditor'
+import { NuvioConversionDialog } from '@/components/managed/ConvertToNuvio'
 import { useUnsavedWarning } from '@/components/managed/useManagedSubmission'
 import { accountStatus, membershipLabel } from '@/components/managed/account-labels'
 import type { createManagedApi, ManagedAccount } from '@/api/managed'
@@ -50,6 +51,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
   const openAddAccount = useUIStore((state) => state.openAddAccountDialog)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
+  const [platform, setPlatform] = useState<'all' | 'stremio' | 'nuvio'>('all')
   const [sort, setSort] = useState('name')
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -65,6 +67,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
     account: ManagedAccount
   } | null>(null)
   const [notice, setNotice] = useState('')
+  const [converting, setConverting] = useState<ManagedAccount | null>(null)
   const locked = inventory.loading || connected.busy || Boolean(editing) || Boolean(bulk)
   useUnsavedWarning(selected.size > 0)
   const refreshInventory = inventory.refresh
@@ -85,11 +88,16 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
       !connected.connections.some((link) => link.localId === local.id && link.status === 'removed')
   )
   const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase())
+  const shownPending =
+    platform !== 'nuvio' && (filter === 'all' || filter === 'attention')
+      ? pending.filter((local) => matches(`${local.name} ${local.email}`))
+      : []
   accounts.sort((a, b) => compareAccounts(a, b, sort))
   const backupWarning = backupAttention(inventory.status, now)
   const needsAttention = accounts.filter((account) => accountAttention(account, now).length > 0)
   const shown = accounts.filter(
     (account) =>
+      (platform === 'all' || (account.platform ?? 'stremio') === platform) &&
       matches(`${account.name} ${account.email}`) &&
       (filter === 'all' ||
         (filter === 'individual'
@@ -204,6 +212,26 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           {notice}
         </p>
       )}
+      <div role="group" aria-label="Account platform" className="flex flex-wrap gap-2">
+        {(['all', 'stremio', 'nuvio'] as const).map((value) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={platform === value ? 'secondary' : 'outline'}
+            aria-pressed={platform === value}
+            disabled={Boolean(bulk) || Boolean(editing)}
+            onClick={() => {
+              if (value !== platform) {
+                setPlatform(value)
+                setPage(0)
+                setSelected(new Set())
+              }
+            }}
+          >
+            {{ all: 'All platforms', stremio: 'Stremio', nuvio: 'Nuvio' }[value]}
+          </Button>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input
           className="mr-auto w-full sm:max-w-sm"
@@ -436,12 +464,17 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
                 ))}
               </ul>
             )}
-            <div className="mt-auto flex items-center justify-between gap-2 border-t pt-4">
+            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t pt-4">
               <span
                 className={`text-xs ${account.expired ? 'text-amber-500' : 'text-muted-foreground'}`}
               >
                 {accountStatus(account)}
               </span>
+              {!account.platform && account.state !== 'offboarding' && !selecting && (
+                <Button variant="outline" size="sm" onClick={() => setConverting(account)}>
+                  Convert to Nuvio
+                </Button>
+              )}
               <Button variant="secondary" size="sm" asChild>
                 <Link to={`/account/${account.id}`}>
                   Open account <ArrowRight className="h-3.5 w-3.5" />
@@ -450,24 +483,21 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
             </div>
           </article>
         ))}
-        {(filter === 'all' || filter === 'attention') &&
-          pending
-            .filter((local) => matches(`${local.name} ${local.email}`))
-            .map((local) => (
-              <article key={local.id} className="space-y-4 rounded-xl border bg-card p-5">
-                <h3 className="break-all font-semibold">{local.name || local.email}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {connected.busy || connected.waiting
-                    ? 'Preparing account…'
-                    : 'Individual management · save a login to enable group sync.'}
-                </p>
-                <Button asChild variant="secondary">
-                  <Link to={`/account/${local.id}`}>
-                    Open account <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </Button>
-              </article>
-            ))}
+        {shownPending.map((local) => (
+          <article key={local.id} className="space-y-4 rounded-xl border bg-card p-5">
+            <h3 className="break-all font-semibold">{local.name || local.email}</h3>
+            <p className="text-sm text-muted-foreground">
+              {connected.busy || connected.waiting
+                ? 'Preparing account…'
+                : 'Individual management · save a login to enable group sync.'}
+            </p>
+            <Button asChild variant="secondary">
+              <Link to={`/account/${local.id}`}>
+                Open account <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </article>
+        ))}
       </div>
       {shown.length > PAGE_SIZE && (
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
@@ -497,6 +527,16 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
             </Button>
           </div>
         </div>
+      )}
+      {converting && (
+        <NuvioConversionDialog
+          api={api}
+          account={converting}
+          onClose={() => {
+            setConverting(null)
+            void inventory.refresh(true)
+          }}
+        />
       )}
       {editing?.kind === 'name' && (
         <AccountNameEditor
@@ -530,7 +570,7 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
         !connected.busy &&
         !connected.waiting &&
         shown.length === 0 &&
-        (!['all', 'attention'].includes(filter) || pending.length === 0) && (
+        shownPending.length === 0 && (
           <div className="rounded-xl border border-dashed p-12 text-center">
             <UsersRound className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
             <h3 className="font-medium">

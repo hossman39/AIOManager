@@ -4,15 +4,15 @@ Release images belong to `ghcr.io/hossman39/aiomanager`. Use the image digest or
 `sha-<full-commit>` from the tested release. Never substitute the original upstream
 image for this fork or use an unattended `latest` update.
 
-## Nuvio rollout with 2.1.0
+## Nuvio rollout with 2.2.0
 
 Pull the public image from the fork. Docker selects AMD64 or ARM64 for your host.
 
 ```sh
-docker pull ghcr.io/hossman39/aiomanager:2.1.0
+docker pull ghcr.io/hossman39/aiomanager:2.2.0
 ```
 
-Use `ghcr.io/hossman39/aiomanager:2.1.0` as the image in your existing Portainer
+Use `ghcr.io/hossman39/aiomanager:2.2.0` as the image in your existing Portainer
 stack. To pin the exact build, use the full `ghcr.io/...` value of
 `AIOMANAGER_IMAGE` in [.env.example](.env.example). If your stack already uses
 that variable, update its value in Portainer. Follow the backup and upgrade
@@ -121,7 +121,7 @@ required for encryption keys and application archives with either database engin
 
 ## Live acceptance
 
-- Health succeeds through the final HTTPS hostname. The footer shows `2.1.0` and
+- Health succeeds through the final HTTPS hostname. The footer shows `2.2.0` and
   the build commit from the release.
 - Existing accounts, memberships and groups are present after a container restart.
 - A dedicated Nuvio profile receives the correct group. Under **Follow membership**,
