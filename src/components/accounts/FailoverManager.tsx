@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 import { Button } from "@/components/ui/button"
 import axios from "axios"
 import {
@@ -301,7 +302,7 @@ export function FailoverManager({ accountId }: FailoverManagerProps) {
                                                 await axios.post(`${apiPath}/autopilot/test-webhook`, {
                                                     webhookUrl: webhook.url,
                                                     accountName: account.name
-                                                })
+                                                }, { headers: await managerHeaders() })
                                                 toast({ title: 'Test Sent', description: 'Check your notification channel.' })
                                             } catch (err) {
                                                 toast({ title: 'Test Failed', description: 'Invalid webhook URL or server error.', variant: 'destructive' })
@@ -372,7 +373,7 @@ export function FailoverManager({ accountId }: FailoverManagerProps) {
                                                         await axios.post(`${apiPath}/autopilot/test-webhook`, {
                                                             webhookUrl: rule.webhookUrl,
                                                             accountName: account.name
-                                                        })
+                                                        }, { headers: await managerHeaders() })
                                                         toast({ title: 'Test Sent', description: 'Check your notification channel.' })
                                                     } catch (err) {
                                                         toast({ title: 'Test Failed', description: 'Invalid URL or server error.', variant: 'destructive' })
@@ -470,7 +471,7 @@ export function FailoverManager({ accountId }: FailoverManagerProps) {
                                                             await axios.post(`${apiPath}/autopilot/test-webhook`, {
                                                                 webhookUrl: ruleWebhookUrl.trim(),
                                                                 accountName: account.name
-                                                            })
+                                                            }, { headers: await managerHeaders() })
                                                             toast({ title: 'Test Sent', description: 'Check your notification channel.' })
                                                         } catch (err) {
                                                             toast({ title: 'Test Failed', description: 'Invalid URL or server error.', variant: 'destructive' })
@@ -709,7 +710,7 @@ export function FailoverManager({ accountId }: FailoverManagerProps) {
                                                                     await axios.post(`${apiPath}/autopilot/test-webhook`, {
                                                                         webhookUrl: rule.webhookUrl,
                                                                         accountName: account?.name || 'Unknown Account'
-                                                                    })
+                                                                    }, { headers: await managerHeaders() })
                                                                     toast({ title: 'Test Sent', description: 'Check your notification channel.' })
                                                                 } catch (err) {
                                                                     toast({ title: 'Test Failed', description: 'Invalid URL or server error.', variant: 'destructive' })

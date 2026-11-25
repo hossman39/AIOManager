@@ -111,12 +111,12 @@ test('authenticated HTTP lifecycle enforces first-sync review, expiry, legacy ga
     })
     const sent = fake.calls.at(-1).body.changes[0]
     assert.equal(sent._ctime, '0001-01-01T00:00:00Z')
+    await post('/api/managed/settings', { expectedVersion: 2, membershipTimezone: 'Asia/Tokyo' })
     const expired = (
       await post(`${base}/membership`, {
         expectedVersion: activation.account.version,
         mode: 'term',
         local: '2020-02-03T12:30',
-        timezone: 'Asia/Tokyo',
       })
     ).account
     assert.equal((await app.managedRuntime.runOnce()).state, 'verified')

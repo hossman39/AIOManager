@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 import {
       installAddon as apiInstallAddon,
       removeAddon as apiRemoveAddon,
@@ -309,11 +310,11 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
                                     const baseUrl = serverUrl || ''
                                     const apiPath = baseUrl.startsWith('http') ? `${baseUrl.replace(/\/$/, '')}/api` : '/api'
                                     const { default: axios } = await import('axios')
-                                    await axios.delete(`${apiPath}/autopilot/account/${id}`)
+                                    await axios.delete(`${apiPath}/autopilot/account/${id}`, { headers: await managerHeaders(id) })
                                     console.log(`[Account] Bulk-deleted server rules for account ${id}`)
                               }
                         } catch (serverErr) {
-                              console.warn('[Account] Bulk server delete failed, falling back to per-rule delete:', serverErr)
+                              console.warn('[Account] Bulk server delete failed, falling back to per-rule delete.')
                               // Fallback: delete each rule individually from server (fire-and-forget)
                               for (const rule of rulesForAccount) {
                                     failoverState.removeRule(rule.id).catch(() => { })

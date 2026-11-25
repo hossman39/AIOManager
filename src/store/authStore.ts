@@ -126,6 +126,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     // Save to session storage
     await saveSessionKey(key)
 
+    const { useSyncStore } = await import('./syncStore')
+    const { auth } = useSyncStore.getState()
+    if (auth.isAuthenticated) useSyncStore.setState({ auth: { ...auth, password } })
+
     // Update state
     set({
       encryptionKey: key,

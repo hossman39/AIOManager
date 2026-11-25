@@ -2,7 +2,7 @@
 
 This build supports individual account setups, optional groups, account-specific
 overrides, first-sync review and
-activation, selectable expiry timezones, selective addon suspension, renewal, retry,
+activation, an admin membership timezone, selective addon suspension, renewal, retry,
 login repair, group deletion, an optional Stremio expiry notice, and verified removal. Use the dedicated Stremio test accounts and
 Android devices agreed for acceptance testing.
 
@@ -123,8 +123,11 @@ outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
    Navigation warns before discarding edits. An older auth-key/OAuth account can
    still open its manual addon controls; **Save Stremio login** enables unattended
    sync, groups and expiry.
-3. Open **Membership**. New dated memberships default to `America/New_York`.
-   Select the last date of access and save. Reopen to confirm the date and timezone.
+3. Choose **Settings → Account sync → Membership timezone** for this admin, then open a client's **Membership** tab.
+   On upgrade, an admin whose dated accounts all share one timezone keeps that timezone.
+   Admins with mixed timezones or no dated memberships start with `America/New_York`.
+   Changing the setting preserves the calendar date for each dated account under that login.
+   Select the last date of access and save. Reopen to confirm the date.
    A dated membership stays active through that local day, including clock changes.
    Lifetime is a separate choice.
 4. Open **Sync & access**, choose **Preview first sync**, review the addon list,
@@ -141,7 +144,7 @@ outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
    members; each page shows up to 10 rows. Selection carries across pages and
    filters. **Select all matching** adds matching accounts, up to 200 selected.
    Select member checkboxes and choose **Bulk update** to set a common expiry
-   date and timezone, choose lifetime, move to another group,
+   date, choose lifetime, move to another group,
    remove from this group, or sync addons now. Removal keeps the accounts and their
    complete setups. Bulk sync skips accounts whose first sync has not started;
    expired accounts keep their expiry rules. Clear the selection to switch tabs.
@@ -168,7 +171,7 @@ outside that LAN, use the deployed manager's reachable HTTPS base URL instead.
    disable all addons until you publish an explicit choice. Individual accounts
    can make the same choices; group addons inherit the group's expiry settings
    even when their names or catalogs are customized for one account.
-   Set one account's expiry a few minutes ahead, in the chosen timezone. After the
+   Set one account's expiry to today in the admin's timezone. After the end-of-day
    cutoff, check **Expired accounts**, the verified suspension status, and Android.
    **Expired · sync pending** must not be mistaken for **Expired · sync verified**;
    a staged expired account says **sync not started**. Only selected addons have

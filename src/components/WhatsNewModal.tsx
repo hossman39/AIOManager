@@ -110,12 +110,20 @@ export function WhatsNewModal({ triggerOpen, onOpenChange }: {
         const lines = body.split('\n')
         const elements: React.ReactNode[] = []
 
-        function applyInlineFormatting(text: string): string {
-            return text
-                .replace(/\*\*(.*?)\*\*/g, '<strong class="text-foreground font-medium">$1</strong>')
-                .replace(/`(.*?)`/g, '<code class="text-xs bg-muted px-1 py-0.5 rounded break-all">$1</code>')
-                .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">$1</a>')
-                .replace(/(^|[\s])((https?:\/\/)[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline break-all">$2</a>')
+        function applyInlineFormatting(text: string): React.ReactNode[] {
+            const nodes: React.ReactNode[] = []
+            const tokens = /\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s]+)/g
+            let end = 0
+            for (const match of text.matchAll(tokens)) {
+                const index = match.index!
+                nodes.push(text.slice(end, index))
+                if (match[1]) nodes.push(<strong key={index}>{match[1]}</strong>)
+                else if (match[2]) nodes.push(<code key={index}>{match[2]}</code>)
+                else nodes.push(<a key={index} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={match[4] || match[5]}>{match[3] || match[5]}</a>)
+                end = index + match[0].length
+            }
+            nodes.push(text.slice(end))
+            return nodes
         }
 
         for (let i = 0; i < lines.length; i++) {
@@ -149,12 +157,10 @@ export function WhatsNewModal({ triggerOpen, onOpenChange }: {
 
             // Blockquotes (> )
             if (line.startsWith('> ')) {
-                const text = line.replace('> ', '').replace('[!NOTE]', '<strong>NOTE</strong>')
+                const text = line.replace('> ', '').replace('[!NOTE]', '**NOTE**')
                 elements.push(
                     <blockquote key={i} className="border-l-2 border-primary/30 pl-3 py-1.5 my-2 text-sm text-muted-foreground italic break-all bg-muted/30 rounded-r min-w-0">
-                        <span dangerouslySetInnerHTML={{
-                            __html: applyInlineFormatting(text)
-                        }} />
+                        <span>{applyInlineFormatting(text)}</span>
                     </blockquote>
                 )
                 continue
@@ -166,9 +172,7 @@ export function WhatsNewModal({ triggerOpen, onOpenChange }: {
                 elements.push(
                     <div key={i} className="flex gap-2 text-sm text-muted-foreground pl-2 min-w-0">
                         <span className="text-primary mt-0.5 flex-shrink-0">•</span>
-                        <span className="break-all min-w-0 flex-1" dangerouslySetInnerHTML={{
-                            __html: applyInlineFormatting(text)
-                        }} />
+                        <span className="break-all min-w-0 flex-1">{applyInlineFormatting(text)}</span>
                     </div>
                 )
                 continue
@@ -176,9 +180,7 @@ export function WhatsNewModal({ triggerOpen, onOpenChange }: {
 
             // Regular text
             elements.push(
-                <p key={i} className="text-sm text-muted-foreground break-all" dangerouslySetInnerHTML={{
-                    __html: applyInlineFormatting(line)
-                }} />
+                <p key={i} className="text-sm text-muted-foreground break-all">{applyInlineFormatting(line)}</p>
             )
         }
 

@@ -1,7 +1,9 @@
 # AIOManager — managed accounts
 
 This is [hossman39's fork](https://github.com/hossman39/AIOManager) of AIOManager.
-Version 2.3.1 applies end-of-day expiry to new and existing dated memberships in their saved timezones
+Version 2.3.2 restricts Autopilot to its owning manager and closes public manager registration by default.
+Each admin can choose their membership timezone under Settings and apply a 12-month subscription in one click.
+The fork applies end-of-day expiry to new and existing dated memberships in their saved timezones
 and fixes the Stremio expiry notice. You can convert a managed Stremio account to a Nuvio primary profile
 using the saved login. Conversion copies membership and addon settings and imports
 watch history. You can also import history using a one-time Stremio login and
@@ -20,7 +22,7 @@ For account setup, TV refresh and watch history, see the [Nuvio walkthrough](doc
 
 ## Installation and updates
 
-The 2.3.1 Docker image is `ghcr.io/hossman39/aiomanager:2.3.1` for AMD64 and ARM64.
+The 2.3.2 Docker image is `ghcr.io/hossman39/aiomanager:2.3.2` for AMD64 and ARM64.
 The [deployment guide](DEPLOY.md) covers upgrading an existing Portainer stack.
 The default Compose file runs the app with SQLite or an existing external database.
 Add [compose.postgres.yml](compose.postgres.yml) for the bundled PostgreSQL service.

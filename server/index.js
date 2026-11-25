@@ -16,7 +16,7 @@ async function shutdown(signal) {
 }
 
 try {
-  app = await buildServer({ backgroundWorkers: true, banner: true })
+  app = await buildServer({ env: { NODE_ENV: 'production', ...process.env }, backgroundWorkers: true, banner: true })
   process.once('SIGINT', () => {
     void shutdown('SIGINT')
   })

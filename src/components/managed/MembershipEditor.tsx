@@ -6,12 +6,14 @@ import {
   type MembershipChange,
   type AccessOverride,
 } from '@/api/managed'
-import { resolveExpiryDate, MEMBERSHIP_TIMEZONE } from '../../../shared/membership-expiry.js'
+import { resolveExpiryDate } from '../../../shared/membership-expiry.js'
 import { Button } from '@/components/ui/button'
 import { useUnsavedWarning } from '@/components/common/UnsavedWorkGuard'
+import { AnnualMembershipButton } from './AnnualMembershipButton'
 
 type Props = {
   account: ManagedAccount
+  timezone: string
   api: ReturnType<typeof createManagedApi>
   onSaved: (account: ManagedAccount) => void
   onReloaded: (account: ManagedAccount) => void
@@ -26,19 +28,11 @@ const accessChoices = [
 type OverrideChange = { override: AccessOverride; expectedVersion: number }
 
 /** A versioned editor: ambiguous saves retain their exact payload and retry key. */
-export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }: Props) {
+export function MembershipEditor({ account, timezone, api, onSaved, onReloaded, onClose }: Props) {
   const [mode, setMode] = useState<'' | 'term' | 'lifetime'>(
     account.membershipType === 'unset' ? '' : account.membershipType
   )
   const [local, setLocal] = useState(account.expiry?.local.slice(0, 10) ?? '')
-  const [timezone, setTimezone] = useState(account.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)
-  const timezones = useMemo(() => {
-    const supported =
-      (
-        Intl as typeof Intl & { supportedValuesOf?: (key: 'timeZone') => string[] }
-      ).supportedValuesOf?.('timeZone') ?? []
-    return [...new Set([MEMBERSHIP_TIMEZONE, 'UTC', timezone, ...supported])].sort()
-  }, [timezone])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [uncertain, setUncertain] = useState(false)
@@ -54,9 +48,7 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
     busy ||
       uncertain ||
       mode !== (account.membershipType === 'unset' ? '' : account.membershipType) ||
-      (mode === 'term' &&
-        (local !== (account.expiry?.local.slice(0, 10) ?? '') ||
-          timezone !== (account.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)))
+      (mode === 'term' && local !== (account.expiry?.local.slice(0, 10) ?? ''))
   )
 
   useEffect(() => {
@@ -69,31 +61,16 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
     }
   }, [])
 
-  const save = async (override?: AccessOverride) => {
-    if (busy || stale || account.state === 'offboarding' || (!uncertain && !override && !valid))
-      return
+  const save = async (change?: MembershipChange | OverrideChange) => {
+    if (busy || stale || account.state === 'offboarding') return
     if (!pending.current) {
-      if (override) {
-        pending.current = {
-          change: { override, expectedVersion: account.version },
-          key: crypto.randomUUID(),
-        }
-      } else if (mode === 'lifetime') {
-        pending.current = {
-          change: { mode, expectedVersion: account.version },
-          key: crypto.randomUUID(),
-        }
-      } else if (mode === 'term' && resolved.ok) {
-        pending.current = {
-          change: {
-            mode,
-            expectedVersion: account.version,
-            local,
-            timezone,
-          },
-          key: crypto.randomUUID(),
-        }
-      } else return
+      if (!change) {
+        if (mode === 'lifetime') change = { mode, expectedVersion: account.version }
+        else if (mode === 'term' && resolved.ok)
+          change = { mode, expectedVersion: account.version, local }
+        else return
+      }
+      pending.current = { change, key: crypto.randomUUID() }
     }
     const request = pending.current
     const controller = new AbortController()
@@ -152,7 +129,6 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
         setStale(false)
         setMode(latest.membershipType === 'unset' ? '' : latest.membershipType)
         setLocal(latest.expiry?.local.slice(0, 10) ?? '')
-        setTimezone(latest.expiry?.timezone ?? MEMBERSHIP_TIMEZONE)
         onReloaded(latest)
       }
     } catch (failure) {
@@ -195,7 +171,8 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
               variant={selectedOverride === value ? 'default' : 'outline'}
               aria-pressed={selectedOverride === value}
               onClick={() => {
-                if (value !== selectedOverride) void save(value)
+                if (value !== selectedOverride)
+                  void save({ override: value, expectedVersion: account.version })
               }}
             >
               {label}
@@ -230,6 +207,10 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
           className="space-y-3"
         >
           <legend className="mb-2 text-sm font-medium">Membership type</legend>
+          <AnnualMembershipButton
+            account={account}
+            onSave={(change) => void save({ ...change, expectedVersion: account.version })}
+          />
           <label className="flex items-center gap-2 text-sm">
             <input
               type="radio"
@@ -252,22 +233,6 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
           </label>
           {mode === 'term' && (
             <div className="space-y-3">
-              <label htmlFor="membership-timezone" className="block text-sm font-medium">
-                Timezone
-              </label>
-              <input
-                id="membership-timezone"
-                list="membership-timezones"
-                required
-                value={timezone}
-                className="block w-full min-w-0 max-w-md rounded-md border bg-background px-3 py-2 text-sm"
-                onChange={(event) => setTimezone(event.target.value)}
-              />
-              <datalist id="membership-timezones">
-                {timezones.map((zone) => (
-                  <option key={zone} value={zone} />
-                ))}
-              </datalist>
               <label htmlFor="membership-cutoff" className="block text-sm font-medium">
                 Expiry date
               </label>
@@ -283,15 +248,13 @@ export function MembershipEditor({ account, api, onSaved, onReloaded, onClose }:
                 onChange={(event) => setLocal(event.target.value)}
               />
               <p id="membership-time-help" className="text-sm text-muted-foreground">
-                Membership stays active through the end of this date in the selected timezone.
+                Membership stays active through the end of this date in your membership timezone.
               </p>
               {local && !resolved.ok && (
                 <p role="alert" className="text-sm text-destructive">
                   {resolved.code === 'NONEXISTENT_EXPIRY'
-                    ? 'This date does not exist in the selected timezone.'
-                    : resolved.code === 'INVALID_TIMEZONE'
-                      ? 'Select a valid timezone from the list or enter a named timezone.'
-                      : 'Enter a valid date.'}
+                    ? 'This date does not exist in your membership timezone.'
+                    : 'Enter a valid date.'}
                 </p>
               )}
               {selectedOverride === 'automatic' &&

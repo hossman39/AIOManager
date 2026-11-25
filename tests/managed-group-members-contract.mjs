@@ -64,6 +64,11 @@ export function managedGroupMembersContract(prefix, options, fixture) {
   check(
     'account bulk changes span groups and individual setups without changing assignment',
     async ({ repository, db, group, selection, publishFixture }) => {
+      await repository.setSettings(
+        firstAuth,
+        { expectedVersion: 1, membershipTimezone: 'Asia/Kathmandu' },
+        randomUUID()
+      )
       const second = (
         await repository.createGroup(
           firstAuth,
@@ -87,7 +92,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
       )
       const request = {
         accounts: accounts.map(({ id, version }) => ({ id, expectedVersion: version })),
-        membership: { mode: 'term', local: '2027-01-01', timezone: 'Asia/Kathmandu' },
+        membership: { mode: 'term', local: '2027-01-01' },
       }
       const key = randomUUID()
       const result = await repository.setAccountsMembership(firstAuth, request, key)
@@ -270,6 +275,11 @@ export function managedGroupMembersContract(prefix, options, fixture) {
   check(
     'bulk membership preserves the chosen timezone and only queues started accounts',
     async ({ repository, db, group, selection, members }) => {
+      await repository.setSettings(
+        firstAuth,
+        { expectedVersion: 1, membershipTimezone: 'Asia/Kathmandu' },
+        randomUUID()
+      )
       const before = await db.query(
         'SELECT id, credentials_enc, personal_enc, group_id FROM managed_accounts ORDER BY id'
       )
@@ -278,7 +288,7 @@ export function managedGroupMembersContract(prefix, options, fixture) {
         group.id,
         {
           accounts: selection,
-          membership: { mode: 'term', local: '2027-01-01', timezone: 'Asia/Kathmandu' },
+          membership: { mode: 'term', local: '2027-01-01' },
         },
         randomUUID()
       )

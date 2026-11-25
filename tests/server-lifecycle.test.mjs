@@ -40,7 +40,7 @@ async function fixture(t, overrides = {}) {
     logger: false,
     serveStatic: false,
     fetch: rejectNetwork,
-    httpClient: { post: rejectNetwork },
+    publicRequest: rejectNetwork,
     ...overrides,
   })
   return { app, db, directory, networkCalls: () => calls }
@@ -252,4 +252,69 @@ test('static plugin still serves the built SPA and rejects source file disclosur
     const response = await app.inject(url)
     assert.ok(!response.body.includes('createCipheriv'))
   }
+})
+
+test('production manager gate permits retained accounts and keeps new signups closed', async (t) => {
+  const { app, db } = await fixture(t, { env: { NODE_ENV: 'production' } })
+  const headers = { 'x-sync-password': 'synthetic-token' }
+  await db.run('INSERT INTO kv_store (key, value, password, updated_at) VALUES ($1,$2,$3,$4)', ['owner', '{}', headers['x-sync-password'], 0])
+  assert.equal((await app.inject('/api/config')).json().registrationOpen, false)
+  const save = id => app.inject({ method:'POST', url:'/api/sync/' + id, headers, payload:{ accounts:[] } })
+  assert.equal((await save('new-owner')).statusCode, 401)
+  assert.equal((await save('owner')).statusCode, 200)
+  const response = await app.inject('/api/health')
+  assert.equal(response.headers['x-content-type-options'], 'nosniff')
+  assert.equal(response.headers['referrer-policy'], 'no-referrer')
+  assert.equal(response.headers['cache-control'], 'no-store')
+  assert.ok(response.headers['content-security-policy'].includes("frame-ancestors 'none'"))
+})
+
+test('Autopilot lifecycle is manager scoped and can bind existing rules from a retained vault', async t => {
+  const { app, db } = await fixture(t)
+  for (const id of ['owner-a', 'owner-b'])
+    assert.equal((await app.inject({method:'POST', url:'/api/sync/'+id, headers:{'x-sync-password':id}, payload:{}})).statusCode, 200)
+  const headers = id => ({'x-manager-id':id, 'x-sync-password':id})
+  const rule = {id:'rule', accountId:'client', authKey:'synthetic-provider-key', priorityChain:[], is_active:0}
+  const route = '/api/autopilot'
+  const request = (method, path, auth, payload) => app.inject({method, url:route+path, headers:auth, payload})
+  assert.equal((await request('GET','/state/client',{})).statusCode,401)
+  assert.equal((await request('POST','/sync',headers('owner-a'),rule)).statusCode,200)
+  assert.equal((await request('GET','/state/client',headers('owner-a'))).json().states.length,1)
+  assert.equal((await request('DELETE','/rule',headers('owner-b'))).statusCode,403)
+  assert.equal((await request('POST','/sync',headers('owner-b'),{...rule, accountId:'other'})).statusCode,409)
+  await db.run('DELETE FROM autopilot_account_owners WHERE account_id=$1',['client'])
+  assert.equal((await request('GET','/state/client',headers('owner-b'))).statusCode,403)
+  assert.equal((await request('GET','/state/client',{...headers('owner-a'),'x-autopilot-proof':rule.authKey})).statusCode,200)
+  assert.equal((await request('GET','/history/client',headers('owner-b'))).statusCode,403)
+  assert.equal((await request('DELETE','/rule',headers('owner-a'))).statusCode,200)
+})
+
+test('legacy relays require manager credentials and forward only explicit provider credentials', async t => {
+  const calls = []
+  const { app } = await fixture(t,{publicRequest:async (url, options) => {
+    calls.push({url,options})
+    return Response.json({status:'ok'})
+  }})
+  const url = '/api/meta-proxy?url=' + encodeURIComponent('https://api.torbox.app/v1/api/user/me')
+  assert.equal((await app.inject(url)).statusCode,401)
+  assert.equal((await app.inject('/api/addon-health?url=https://example.org/manifest.json')).statusCode,401)
+  assert.equal(calls.length,0)
+  const headers = {'x-manager-id':'owner','x-sync-password':'synthetic'}
+  await app.inject({method:'POST',url:'/api/sync/owner',headers,payload:{}})
+  const res = await app.inject({method:'POST',url:'/api/meta-proxy',payload:{url:'https://api.torbox.app/v1/api/user/me'},headers:{...headers,authorization:'Basic synthetic','x-provider-authorization':'Bearer synthetic'}})
+  assert.equal(res.statusCode,200)
+  assert.deepEqual(calls[0].options.headers,{Accept:'application/json',Authorization:'Bearer synthetic'})
+})
+
+test('repeated rejected logins throttle just that manager and leave the public notice route available', async t => {
+  const { app, db } = await fixture(t, { env: { NODE_ENV: 'production' } })
+  for (const id of ['manager-a', 'manager-b'])
+    await db.run('INSERT INTO kv_store (key, value, password, updated_at) VALUES ($1,$2,$3,$4)', [id, '{}', 'synthetic-token', 0])
+  const login = (id, token) => app.inject({url:'/api/sync/'+id,headers:{'x-sync-password':token}})
+  for (let i = 0; i < 30; i++) assert.equal((await login('manager-a','incorrect')).statusCode,401)
+  const limited = await login('manager-a','incorrect')
+  assert.equal(limited.statusCode,429)
+  assert.ok(Number(limited.headers['retry-after']) > 0)
+  assert.equal((await login('manager-b','synthetic-token')).statusCode,200)
+  assert.equal((await app.inject('/api/notice/synthetic/manifest.json')).statusCode,404)
 })

@@ -24,3 +24,8 @@ export function resolveExpiryDate(
   date: string,
   timezone?: string
 ): { ok: true; expiry: MembershipExpiry } | InvalidExpiry
+export function resolveAnnualExpiry(
+  expiryAt: number | null,
+  timezone: string,
+  now: number
+): { ok: true; expiry: MembershipExpiry } | InvalidExpiry

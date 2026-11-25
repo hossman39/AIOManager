@@ -22,6 +22,7 @@ export function LoginPage() {
     // State
     const [mode, setMode] = useState<'login' | 'register'>('login')
     const [showPassword, setShowPassword] = useState(false)
+    const [registrationOpen, setRegistrationOpen] = useState(false)
     const [customHtml, setCustomHtml] = useState<string | null>(null)
     const [isUnlocking, setIsUnlocking] = useState(false)
     const [showSwitchConfirm, setShowSwitchConfirm] = useState(false)
@@ -50,6 +51,7 @@ export function LoginPage() {
         fetch('/api/config')
             .then(res => res.json())
             .then(data => {
+                setRegistrationOpen(data.registrationOpen === true)
                 if (data.customHtml) setCustomHtml(data.customHtml)
             })
             .catch(() => { /* Silently fail - optional feature */ })
@@ -156,9 +158,9 @@ export function LoginPage() {
             <div className="max-w-md w-full space-y-8">
                 {/* Custom HTML Injection (for hosted deployments) */}
                 {customHtml && (
-                    <div
-                        className="custom-html-container"
-                        dangerouslySetInnerHTML={{ __html: customHtml }}
+                    <iframe title="Server announcement" sandbox="" referrerPolicy="no-referrer"
+                        className="custom-html-container w-full border-0"
+                        srcDoc={customHtml}
                     />
                 )}
 
@@ -200,9 +202,9 @@ export function LoginPage() {
                 )}
 
                 <Tabs value={mode} onValueChange={(v) => { setMode(v as any); setShowPassword(false); }} className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 mb-6 h-12">
-                        <TabsTrigger value="register" className="h-10">New Account</TabsTrigger>
-                        <TabsTrigger value="login" className="h-10">Login</TabsTrigger>
+                    <TabsList className="flex w-full mb-6 h-12">
+                        {registrationOpen && <TabsTrigger value="register" className="h-10 flex-1">New Account</TabsTrigger>}
+                        <TabsTrigger value="login" className="h-10 flex-1">Login</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="register">

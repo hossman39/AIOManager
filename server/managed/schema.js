@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { resolveExpiryDate } from '../../shared/membership-expiry.js'
 import { createManagedJobStore } from './jobs.js'
+import { rezoneMemberships } from './membership-timezone.js'
 
 async function migrateExpiryDates(tx, now) {
   const jobs = createManagedJobStore({ db: tx })
@@ -311,6 +312,37 @@ CREATE TABLE managed_external_refs (
       CHECK (group_sync_requested IN (0, 1));`,
   }),
   Object.freeze({ version: 12, name: 'end-of-day-memberships', apply: migrateExpiryDates }),
+  Object.freeze({
+    version: 13,
+    name: 'shared-membership-timezone',
+    async apply(tx, now) {
+      await tx.exec(
+        "ALTER TABLE managed_owners ADD COLUMN membership_timezone TEXT NOT NULL DEFAULT 'America/New_York'"
+      )
+      const owners = await tx.query(
+        `SELECT owner_id, MIN(expiry_zone) AS first_zone, MAX(expiry_zone) AS last_zone
+         FROM managed_accounts WHERE expiry_at IS NOT NULL GROUP BY owner_id`
+      )
+      for (const owner of owners) {
+        if (owner.first_zone === owner.last_zone) {
+          await tx.run('UPDATE managed_owners SET membership_timezone = $1 WHERE owner_id = $2', [
+            owner.first_zone,
+            owner.owner_id,
+          ])
+        } else {
+          await rezoneMemberships(tx, owner.owner_id, 'America/New_York', now)
+        }
+      }
+    },
+  }),
+  Object.freeze({
+    version: 14,
+    name: 'autopilot-account-owners',
+    sql: `CREATE TABLE autopilot_account_owners (
+      account_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES kv_store(key) ON DELETE RESTRICT
+    );
+    CREATE INDEX autopilot_owner_accounts ON autopilot_account_owners(owner_id);`,
+  }),
 ])
 
 export function migrationChecksum(migration) {

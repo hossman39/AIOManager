@@ -64,5 +64,5 @@ export async function resilientFetch(
         }
     }
 
-    throw lastError || new Error(`Failed to fetch ${url} after ${retries} retries`);
+    throw lastError || new Error(`Request failed after ${retries} retries`);
 }

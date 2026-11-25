@@ -3,8 +3,10 @@ import { createExpiryNoticeRepository } from './expiry-notice.js'
 import { z } from 'zod'
 import { parseCredentialImport } from '../../shared/credential-import.js'
 import {
+  resolveAnnualExpiry,
   resolveExpiry,
   resolveExpiryDate,
+  validMembershipTimezone,
   MEMBERSHIP_TIMEZONE,
 } from '../../shared/membership-expiry.js'
 import { authenticateManager } from './auth.js'
@@ -23,6 +25,10 @@ import { createIntegrationRepository } from './integration.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const membershipSchema = z.discriminatedUnion('mode', [
+  z.strictObject({
+    mode: z.enum(['add-year', 'start-year']),
+    expectedVersion: z.number().int().positive(),
+  }),
   z.strictObject({ mode: z.literal('lifetime'), expectedVersion: z.number().int().positive() }),
   z.strictObject({
     mode: z.literal('term'),
@@ -44,14 +50,19 @@ export function parseImportBody(body) {
   return parseCredentialImport(JSON.stringify(body))
 }
 
-function membershipDeadline({ local, offset, timezone }) {
+function membershipDeadline(
+  { local, offset, timezone },
+  settingsZone = timezone ?? MEMBERSHIP_TIMEZONE
+) {
+  if (timezone !== undefined && !validMembershipTimezone(timezone))
+    return { ok: false, code: 'INVALID_TIMEZONE' }
   // Older clients submit a wall time. Preserve their validation and use the date they selected.
   if (local.includes('T')) {
-    const legacy = resolveExpiry(local, offset, timezone)
+    const legacy = resolveExpiry(local, offset, timezone ?? settingsZone)
     if (!legacy.ok) return legacy
     local = local.slice(0, 10)
   }
-  return resolveExpiryDate(local, timezone)
+  return resolveExpiryDate(local, settingsZone)
 }
 
 /** Staging cannot activate; only publication preparation may invoke a trusted manifest validator. */
@@ -107,8 +118,8 @@ export function createManagedRepository({
     return result
   }
 
-  async function setMembershipInTransaction(tx, owner, change, timestamp) {
-    const { id, expiry } = change
+  async function setMembershipInTransaction(tx, owner, change, timestamp, timezone) {
+    const { id } = change
     const account = await tx.get(
       `SELECT * FROM managed_accounts WHERE owner_id = $1 AND id = $2${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
       [owner, id]
@@ -117,6 +128,14 @@ export function createManagedRepository({
     if (account.record_version !== change.expectedVersion)
       throw new ManagedError('VERSION_CONFLICT')
     if (account.state === 'offboarding') throw new ManagedError('INVALID_STATE')
+    let expiry = change.expiry
+    if (change.mode === 'add-year' || change.mode === 'start-year') {
+      if ((account.lifetime === 1) !== (change.mode === 'start-year'))
+        throw new ManagedError('INVALID_STATE')
+      const renewed = resolveAnnualExpiry(account.expiry_at, timezone, timestamp)
+      if (!renewed.ok) throw new ManagedError(renewed.code)
+      expiry = renewed.expiry
+    }
     const lifetime = change.mode === 'lifetime' ? 1 : 0
     const suspendedAt = lifetime === 1 || expiry.at > timestamp ? null : account.suspended_at
     if (
@@ -178,13 +197,7 @@ export function createManagedRepository({
     if (!parsed.success) throw new ManagedError('INVALID_INPUT')
     const value = parsed.data
     value.accounts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    let expiry = null
-    if (value.membership.mode === 'term') {
-      const resolved = membershipDeadline(value.membership)
-      if (!resolved.ok) throw new ManagedError(resolved.code)
-      expiry = resolved.expiry
-    }
-    return ownerTransaction(auth, (tx, owner, _settings, timestamp) =>
+    return ownerTransaction(auth, (tx, owner, settings, timestamp) =>
       idempotent(
         tx,
         owner,
@@ -193,6 +206,12 @@ export function createManagedRepository({
         { ...(groupId === undefined ? {} : { groupId }), ...value },
         timestamp,
         async () => {
+          let expiry = null
+          if (value.membership.mode === 'term') {
+            const resolved = membershipDeadline(value.membership, settings.membership_timezone)
+            if (!resolved.ok) throw new ManagedError(resolved.code)
+            expiry = resolved.expiry
+          }
           if (groupId === undefined) await lockAccountSelection(tx, owner, value.accounts)
           else await lockGroupMembers(tx, owner, groupId, value.accounts)
           const accounts = []
@@ -205,7 +224,8 @@ export function createManagedRepository({
                 mode: value.membership.mode,
                 expiry,
               },
-              timestamp
+              timestamp,
+              settings.membership_timezone
             )
             accounts.push({ account: result.account, jobId: result.jobId })
           }
@@ -421,22 +441,36 @@ export function createManagedRepository({
     async setMembership(auth, id, input, requestKey) {
       const parsed = membershipSchema.safeParse(input)
       if (!parsed.success) throw new ManagedError('INVALID_INPUT')
-      let expiry = null
+      // Preserve the request fingerprint of pre-upgrade saves so retries can replay.
+      let previousExpiry = null
       if (parsed.data.mode === 'term') {
         const resolved = membershipDeadline(parsed.data)
-        if (!resolved.ok) throw new ManagedError(resolved.code)
-        const { at, local, offset, timezone } = resolved.expiry
-        expiry = { at, local, offset, timezone }
+        if (resolved.ok) {
+          const { at, local, offset, timezone } = resolved.expiry
+          previousExpiry = { at, local, offset, timezone }
+        } else previousExpiry = parsed.data
       }
       const change = {
         id,
         expectedVersion: parsed.data.expectedVersion,
         mode: parsed.data.mode,
-        expiry,
+        expiry: previousExpiry,
       }
-      return ownerTransaction(auth, (tx, owner, _ownerRow, timestamp) =>
+      return ownerTransaction(auth, (tx, owner, settings, timestamp) =>
         idempotent(tx, owner, 'accounts.membership', requestKey, change, timestamp, async () => {
-          return setMembershipInTransaction(tx, owner, change, timestamp)
+          let expiry = null
+          if (change.mode === 'term') {
+            const resolved = membershipDeadline(parsed.data, settings.membership_timezone)
+            if (!resolved.ok) throw new ManagedError(resolved.code)
+            expiry = resolved.expiry
+          }
+          return setMembershipInTransaction(
+            tx,
+            owner,
+            { ...change, expiry },
+            timestamp,
+            settings.membership_timezone
+          )
         })
       )
     },
@@ -603,7 +637,7 @@ export function createManagedRepository({
     async status(auth) {
       const owner = await authorize(auth)
       const settings = await db.get(
-        'SELECT version, write_paused, safe_mode FROM managed_owners WHERE owner_id = $1',
+        'SELECT version, write_paused, safe_mode, membership_timezone FROM managed_owners WHERE owner_id = $1',
         [owner]
       )
       const counts = await db.query(
@@ -626,6 +660,7 @@ export function createManagedRepository({
         lastBackupAt: live.lastBackupAt ?? null,
         ownerWritePaused: settings ? settings.write_paused === 1 : true,
         safeMode: settings ? settings.safe_mode === 1 : true,
+        membershipTimezone: settings?.membership_timezone ?? MEMBERSHIP_TIMEZONE,
         version: settings?.version ?? null,
         accounts: Object.fromEntries(
           ['staged', 'active', 'offboarding'].map((state) => [

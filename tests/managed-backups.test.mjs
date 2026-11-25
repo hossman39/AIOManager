@@ -35,6 +35,7 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     await restored.init()
     const s = await prepareManagedFixture(source)
     const staged = await s.repository.stageImport(firstAuth, parsedAccounts(), randomUUID())
+    await source.run('INSERT INTO autopilot_account_owners (account_id, owner_id) VALUES ($1,$2)', ['synthetic-legacy-client', firstAuth.owner])
     const id = staged.accounts[0].id
     const cached = {
       accounts: [{ localId: 'backup-cache-account', email: 'Person@example.invalid' }],
@@ -43,10 +44,15 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
       (await s.repository.connectAccounts(firstAuth, cached)).connections[0].account.id,
       id
     )
+    await s.repository.setSettings(
+      firstAuth,
+      { expectedVersion: 1, membershipTimezone: 'Europe/Paris' },
+      randomUUID()
+    )
     await s.repository.setMembership(
       firstAuth,
       id,
-      { expectedVersion: 1, mode: 'term', local: '2027-02-03T12:30', timezone: 'Europe/Paris' },
+      { expectedVersion: 1, mode: 'term', local: '2027-02-03T12:30' },
       randomUUID()
     )
     const addon = { ...configuredAddon(), flags: { enabled: true, protected: false } }
@@ -85,7 +91,7 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
     const expiryNotice = await s.repository.saveExpiryNotice(
       firstAuth,
       {
-        expectedVersion: 1,
+        expectedVersion: 2,
         settings: {
           ...defaultExpiryNotice,
           enabled: true,
@@ -132,9 +138,11 @@ test('daily encrypted snapshots restore credentials, selected timezone, and key 
       secret: syntheticKey,
     })
     assert.deepEqual(result.keys, keys)
+    assert.equal((await restored.get('SELECT owner_id FROM autopilot_account_owners WHERE account_id = $1', ['synthetic-legacy-client'])).owner_id, firstAuth.owner)
     const crypto = await initializeManagedCrypto(restored, keys)
     const repository = createManagedRepository({ db: restored, crypto, legacyKeys: [syntheticKey] })
     const account = await repository.getAccount(firstAuth, id)
+    assert.equal((await repository.status(firstAuth)).membershipTimezone, 'Europe/Paris')
     assert.equal(account.expiry.timezone, 'Europe/Paris')
     assert.equal(account.accessOverride, 'active')
     assert.equal(account.email, 'Person@example.invalid')

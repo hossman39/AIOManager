@@ -132,3 +132,13 @@ export function resolveExpiryDate(date, timezone = MEMBERSHIP_TIMEZONE) {
     expiry: { at: high, local: date, timezone, offset, label: offsetLabel(offset) },
   }
 }
+
+export function resolveAnnualExpiry(expiryAt, timezone, now) {
+  if (!validMembershipTimezone(timezone)) return { ok: false, code: 'INVALID_TIMEZONE' }
+  // The stored cutoff is exclusive. One millisecond earlier is the last paid day.
+  const base = expiryAt !== null && expiryAt > now ? expiryAt - 1 : now
+  const local = partsAt(formatter(timezone), base).local
+  const nextYear = Number(local.slice(0, 4)) + 1
+  const monthDay = local.slice(5, 10)
+  return resolveExpiryDate(`${nextYear}-${monthDay === '02-29' ? '02-28' : monthDay}`, timezone)
+}

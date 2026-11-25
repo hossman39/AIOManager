@@ -15,16 +15,13 @@ export function StremioOAuth({ onAuthKey, onError, disabled }: StremioOAuthProps
     const [stremioCode, setStremioCode] = useState('')
     const [expiresAt, setExpiresAt] = useState<number | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [tick, setTick] = useState(0)
+    const [, setTick] = useState(0)
     const [isCopied, setIsCopied] = useState(false)
     const [isLinkCopied, setIsLinkCopied] = useState(false)
 
     const isExpired = expiresAt ? Date.now() > expiresAt : false
 
     const timeLeft = (() => {
-        // We reference tick to ensure we re-calculate every second
-        // but we don't need its value, just the re-render it triggers
-        tick;
         if (!expiresAt || isExpired) return null
         const diff = Math.max(0, expiresAt - Date.now())
         const minutes = Math.floor(diff / 60000)

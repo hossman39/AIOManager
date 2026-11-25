@@ -30,5 +30,5 @@ export function accountStatus(account: ManagedAccount) {
 export function membershipLabel(account: ManagedAccount) {
   if (account.membershipType === 'lifetime') return 'Lifetime'
   if (!account.expiry) return 'Membership not set'
-  return `${membershipDate.format(new Date(account.expiry.local.slice(0, 10)))} (${account.expiry.timezone})`
+  return membershipDate.format(new Date(account.expiry.local.slice(0, 10)))
 }

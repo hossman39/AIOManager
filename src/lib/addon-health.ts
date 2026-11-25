@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 
 import { SavedAddon } from '@/types/saved-addon'
 
@@ -93,7 +94,7 @@ export async function checkAddonHealth(addonUrl: string): Promise<HealthStatus> 
 
   // 3. Server-side Proxy Fallback
   try {
-    const response = await fetch(`/api/addon-health?url=${encodeURIComponent(addonUrl)}`);
+    const response = await fetch('/api/addon-health', { method:'POST', headers:{ ...await managerHeaders(), 'Content-Type':'application/json' }, body: JSON.stringify({ url: addonUrl }) });
     if (!response.ok) {
       return { isOnline: false, error: 'Connection Failed' };
     }
@@ -245,8 +246,8 @@ export async function checkAddonFunctionality(addonUrl: string): Promise<{ isHea
       if (res.ok) manifest = await res.json()
     } catch {
       // Try proxy
-      const proxyUrl = `/api/meta-proxy?url=${encodeURIComponent(manifestUrl)}`
-      const res = await fetch(proxyUrl, { signal: controller.signal })
+      const res = await fetch('/api/meta-proxy', { method: 'POST', signal: controller.signal,
+        headers: { ...await managerHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ url: manifestUrl }) })
       if (res.ok) manifest = await res.json()
     }
     clearTimeout(id)

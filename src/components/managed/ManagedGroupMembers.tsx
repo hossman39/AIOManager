@@ -30,6 +30,7 @@ export function ManagedGroupMembers({
   onLock: (locked: boolean) => void
   onChanged: () => void
 }) {
+  const [timezone, setTimezone] = useState('')
   const [accounts, setAccounts] = useState<ManagedAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [picking, setPicking] = useState(false)
@@ -46,6 +47,7 @@ export function ManagedGroupMembers({
     setLoading(true)
     setError('')
     try {
+      const status = await api.status(abort.signal)
       const inventory = new Map<string, ManagedAccount>()
       let after = ''
       do {
@@ -54,6 +56,7 @@ export function ManagedGroupMembers({
         after = page.nextCursor ?? ''
       } while (after && !abort.signal.aborted)
       if (!abort.signal.aborted) {
+        setTimezone(status.membershipTimezone)
         setAccounts(
           [...inventory.values()].sort(
             (a, b) =>
@@ -261,8 +264,9 @@ export function ManagedGroupMembers({
           </div>
         </GroupMemberDialog>
       )}
-      {bulk && (
+      {bulk && timezone && (
         <ManagedBulkUpdate
+          timezone={timezone}
           api={api}
           group={group}
           accounts={members.filter((account) => selected.has(account.id))}

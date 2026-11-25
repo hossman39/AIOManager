@@ -18,6 +18,7 @@ import { managedMigrations, migrationChecksum } from './schema.js'
 // Dependency order is also the restore order. No dynamic SQL identifiers from a backup.
 const tables = [
   'kv_store',
+  'autopilot_account_owners',
   'autopilot_rules',
   'failover_history',
   'managed_metadata',

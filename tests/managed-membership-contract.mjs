@@ -9,6 +9,119 @@ export function managedMembershipContract(prefix, options, fixture) {
   const check = (name, fn) =>
     test(`${prefix}: ${name}`, options, async (t) => fn(await fixture(t), t))
 
+  check(
+    'one-click annual renewals use each paid-through date or local today and replay once',
+    async ({ repository, advance, now }) => {
+      advance(Date.parse('2028-03-01T01:00:00Z') - now())
+      const { accounts } = await repository.stageImport(
+        firstAuth,
+        parsedAccounts([
+          { email: 'new@example.invalid', password: 'synthetic' },
+          { email: 'early@example.invalid', password: 'synthetic' },
+          { email: 'late@example.invalid', password: 'synthetic' },
+        ]),
+        randomUUID()
+      )
+      const byEmail = (email) => accounts.find((row) => row.email === email).id
+      const fresh = byEmail('new@example.invalid')
+      const key = randomUUID()
+      const annual = { mode: 'add-year', expectedVersion: 1 }
+      const added = await repository.setMembership(firstAuth, fresh, annual, key)
+      assert.equal(added.account.expiry.local, '2029-02-28')
+      assert.equal(added.account.expiry.at, Date.parse('2029-03-01T05:00:00Z'))
+      assert.equal(added.jobId, null)
+      const setTerm = (email, local, timezone) =>
+        repository.setMembership(
+          firstAuth,
+          byEmail(email),
+          { mode: 'term', expectedVersion: 1, local, timezone },
+          randomUUID()
+        )
+      const early = await setTerm('early@example.invalid', '2028-06-30', 'Asia/Kathmandu')
+      const late = await setTerm('late@example.invalid', '2026-10-10', 'Asia/Tokyo')
+      const bulk = await repository.setAccountsMembership(
+        firstAuth,
+        {
+          accounts: [early, late].map(({ account }) => ({
+            id: account.id,
+            expectedVersion: account.version,
+          })),
+          membership: { mode: 'add-year' },
+        },
+        randomUUID()
+      )
+      const expiryOf = (id) => bulk.accounts.find((row) => row.account.id === id).account.expiry
+      assert.equal(expiryOf(early.account.id).local, '2029-06-30')
+      assert.equal(expiryOf(late.account.id).local, '2029-02-28')
+      assert.equal(expiryOf(early.account.id).timezone, 'America/New_York')
+      advance(86_400_000)
+      assert.equal((await repository.setMembership(firstAuth, fresh, annual, key)).replayed, true)
+      assert.equal((await repository.getAccount(firstAuth, fresh)).version, added.account.version)
+      await assert.rejects(repository.setMembership(firstAuth, fresh, annual, randomUUID()), {
+        code: 'VERSION_CONFLICT',
+      })
+      const lifetime = await repository.setMembership(
+        firstAuth,
+        fresh,
+        { mode: 'lifetime', expectedVersion: added.account.version },
+        randomUUID()
+      )
+      await assert.rejects(
+        repository.setMembership(
+          firstAuth,
+          fresh,
+          { ...annual, expectedVersion: lifetime.account.version },
+          randomUUID()
+        ),
+        { code: 'INVALID_STATE' }
+      )
+    }
+  )
+
+  test(
+    `${prefix}: timezone upgrade and settings changes preserve paid dates and reconcile access`,
+    options,
+    async (t) => {
+      const { repository, db, ids, now, advance } = await prepareJobFixture(
+        await fixture(t, { migrations: managedMigrations.slice(0, 12) })
+      )
+      const other = (await repository.stageImport(secondAuth, parsedAccounts(), randomUUID()))
+        .accounts[0]
+      const utc = Date.parse('2027-01-02T00:00:00Z')
+      advance(utc + 3600000 - now())
+      await db.run(
+        `UPDATE managed_accounts SET expiry_local = '2027-01-01', expiry_zone = 'UTC',
+      expiry_offset = 0, expiry_zone_offset = 0, expiry_timezone = 'America/New_York', expiry_at = $1`,
+        [utc]
+      )
+      await db.run(
+        "UPDATE managed_accounts SET expiry_zone = 'America/New_York', expiry_at = $1 WHERE id = $2",
+        [utc + 5 * 3600000, ids[1]]
+      )
+      await db.run("UPDATE managed_accounts SET access_override = 'active' WHERE id = $1", [ids[2]])
+      await migrateManagedSchema(db, managedMigrations, now())
+      assert.equal((await repository.status(firstAuth)).membershipTimezone, 'America/New_York')
+      assert.equal((await repository.status(secondAuth)).membershipTimezone, 'UTC')
+      assert.equal((await repository.getAccount(secondAuth, other.id)).expiry.at, utc)
+      assert.deepEqual(await db.query('SELECT account_id, cause FROM managed_jobs'), [
+        { account_id: ids[0], cause: 'renewal' },
+      ])
+      await repository.setSettings(
+        firstAuth,
+        { expectedVersion: 1, membershipTimezone: 'UTC' },
+        randomUUID()
+      )
+      const updated = await repository.getAccount(firstAuth, ids[0])
+      assert.equal(updated.expiry.local, '2027-01-01')
+      assert.equal(updated.expired, true)
+      assert.equal((await repository.getAccount(firstAuth, ids[2])).accessOverride, 'active')
+      assert.equal(
+        (await db.get("SELECT COUNT(*) AS count FROM managed_jobs WHERE cause = 'expiry'")).count,
+        2
+      )
+    }
+  )
+
   test(
     `${prefix}: upgrading restores today's automatic expiry once and honors overrides`,
     options,
@@ -54,44 +167,59 @@ export function managedMembershipContract(prefix, options, fixture) {
   )
 
   check(
-    'changing the timezone keeps the inclusive date and recomputes the end of day',
-    async ({ repository }) => {
-      const id = (await repository.stageImport(firstAuth, parsedAccounts(), randomUUID()))
-        .accounts[0].id
+    'one admin timezone controls existing and new dates, annual conversions, bulk requests and retries',
+    async ({ repository, advance, now }) => {
+      const setZone = (expectedVersion, membershipTimezone, key = randomUUID()) =>
+        repository.setSettings(firstAuth, { expectedVersion, membershipTimezone }, key)
+      const local = '2027-01-01'
+      const staged = async (auth) =>
+        (await repository.stageImport(auth, parsedAccounts(), randomUUID())).accounts[0].id
+      const id = await staged(firstAuth)
+      const other = await staged(secondAuth)
+      const term = { mode: 'term', local, expectedVersion: 1, timezone: 'Asia/Tokyo' }
       const key = randomUUID()
-      const input = {
-        mode: 'term',
-        local: '2027-01-01',
-        timezone: 'Asia/Kathmandu',
-        expectedVersion: 1,
-      }
-      const saved = await repository.setMembership(firstAuth, id, input, key)
-      assert.equal(saved.account.expiry.timezone, 'Asia/Kathmandu')
-      assert.equal(saved.account.expiry.offset, 345)
-      assert.equal(saved.account.expiry.at, Date.parse('2027-01-01T18:15:00Z'))
-      assert.equal((await repository.setMembership(firstAuth, id, input, key)).replayed, true)
-      const changed = await repository.setMembership(
+      const original = await repository.setMembership(firstAuth, id, term, key)
+      await repository.setMembership(secondAuth, other, term, randomUUID())
+      assert.equal(original.account.expiry.timezone, 'America/New_York')
+      const settingKey = randomUUID()
+      await setZone(1, 'Asia/Kathmandu', settingKey)
+      assert.equal((await setZone(1, 'Asia/Kathmandu', settingKey)).replayed, true)
+      const revised = await repository.getAccount(firstAuth, id)
+      assert.equal(revised.expiry.local, local)
+      assert.equal(revised.expiry.at, Date.parse('2027-01-01T18:15:00Z'))
+      assert.equal(revised.version, original.account.version + 1)
+      assert.equal((await repository.setMembership(firstAuth, id, term, key)).replayed, true)
+      assert.equal(
+        (await repository.getAccount(secondAuth, other)).expiry.timezone,
+        'America/New_York'
+      )
+      assert.equal((await repository.status(firstAuth)).membershipTimezone, 'Asia/Kathmandu')
+      await assert.rejects(setZone(1, 'UTC'), { code: 'VERSION_CONFLICT' })
+      await assert.rejects(setZone(2, 'Bad/Zone'), { code: 'INVALID_TIMEZONE' })
+      const lifetime = await repository.setMembership(
         firstAuth,
         id,
+        { mode: 'lifetime', expectedVersion: revised.version },
+        randomUUID()
+      )
+      advance(Date.parse('2028-02-29T19:00:00Z') - now())
+      const converted = await repository.setMembership(
+        firstAuth,
+        id,
+        { mode: 'start-year', expectedVersion: lifetime.account.version },
+        randomUUID()
+      )
+      assert.equal(converted.account.expiry.local, '2029-03-01')
+      const bulk = await repository.setAccountsMembership(
+        firstAuth,
         {
-          mode: 'term',
-          local: '2027-01-01',
-          timezone: 'UTC',
-          expectedVersion: saved.account.version,
+          accounts: [{ id, expectedVersion: converted.account.version }],
+          membership: { mode: 'add-year' },
         },
         randomUUID()
       )
-      assert.equal(changed.account.expiry.at, Date.parse('2027-01-02T00:00:00Z'))
-      assert.equal((await repository.getAccount(firstAuth, id)).expiry.timezone, 'UTC')
-      await assert.rejects(
-        repository.setMembership(
-          firstAuth,
-          id,
-          { ...input, timezone: 'Bad/Timezone', expectedVersion: changed.account.version },
-          randomUUID()
-        ),
-        { code: 'INVALID_TIMEZONE' }
-      )
+      assert.equal(bulk.accounts[0].account.expiry.local, '2030-03-01')
+      assert.equal(bulk.accounts[0].account.expiry.timezone, 'Asia/Kathmandu')
     }
   )
 

@@ -3,7 +3,7 @@
   "info": {
     "title": "AIOManager integration API",
     "version": "1.0.0",
-    "description": "Application 2.3.1. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the saved IANA timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
+    "description": "Application 2.3.2. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the admin membership timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect."
   },
   "servers": [
     {
@@ -302,7 +302,11 @@
                 "minimum": 1
               },
               "mode": {
-                "const": "lifetime"
+                "enum": [
+                  "lifetime",
+                  "add-year",
+                  "start-year"
+                ]
               }
             },
             "required": [
@@ -329,6 +333,8 @@
               },
               "timezone": {
                 "type": "string",
+                "deprecated": true,
+                "description": "Used only to validate legacy local date-time input. The admin membership timezone controls the cutoff.",
                 "examples": [
                   "America/New_York"
                 ]
@@ -379,7 +385,11 @@
                 "type": "object",
                 "properties": {
                   "mode": {
-                    "const": "lifetime"
+                    "enum": [
+                      "lifetime",
+                      "add-year",
+                      "start-year"
+                    ]
                   }
                 },
                 "required": [
@@ -401,6 +411,8 @@
                   },
                   "timezone": {
                     "type": "string",
+                    "deprecated": true,
+                    "description": "Used only to validate legacy local date-time input. The admin membership timezone controls the cutoff.",
                     "examples": [
                       "America/New_York"
                     ]
@@ -1487,6 +1499,9 @@
           "ownerWritePaused": {
             "type": "boolean"
           },
+          "membershipTimezone": {
+            "type": "string"
+          },
           "writerReady": {
             "type": "boolean"
           },
@@ -1549,6 +1564,7 @@
           "capabilities",
           "writePaused",
           "ownerWritePaused",
+          "membershipTimezone",
           "writerReady",
           "lastScanAt",
           "lastBackupAt",
@@ -2313,7 +2329,7 @@
     "/accounts/{id}/membership": {
       "post": {
         "operationId": "post__accounts__id__membership",
-        "summary": "Set dated or lifetime membership. A manual account access override takes precedence.",
+        "summary": "Set a membership or add 12 months from the later of the saved expiry date or local today. A manual account access override takes precedence.",
         "parameters": [
           {
             "name": "id",

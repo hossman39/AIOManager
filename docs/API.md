@@ -55,9 +55,13 @@ account's addon configuration also requires `accounts:write` and
    records retain reservations so a retry cannot resurrect the account.
 4. Set membership with `POST /accounts/{id}/membership`. Use `expectedVersion`
    from the latest account and either `mode: "lifetime"` or `mode: "term"`,
-   `local` as an inclusive YYYY-MM-DD date, and an optional IANA `timezone`
-   (default America/New_York). Access expires when that local date ends. Older
-   clients can still submit a valid local date and time with its optional offset.
+   `local` as an inclusive YYYY-MM-DD date. Access expires at the end of the date in
+   the admin's **Settings → Account sync → Membership timezone**. Read it from
+   `GET /status` as `membershipTimezone`. Older clients can submit a local date and time
+   with its timezone and offset for validation. The admin setting determines the cutoff.
+   Use `mode: "add-year"` to add 12 calendar months to the later of the saved expiry
+   date or today in the admin's timezone. Exclude lifetime accounts from bulk renewals.
+   Use `mode: "start-year"` to explicitly convert a lifetime membership to a year from today.
 5. Assign a published group through `POST /accounts/assign-group`, or save an
    individual setup through `POST /accounts/{id}/addons`. Group operations keep
    staging passive. Addon changes preserve the same protection and expiry rules
@@ -75,7 +79,7 @@ account's addon configuration also requires `accounts:write` and
 Example membership body:
 
 ```json
-{"expectedVersion": 3, "mode": "term", "local": "2027-01-15", "timezone": "America/New_York"}
+{"expectedVersion": 3, "mode": "term", "local": "2027-01-15"}
 ```
 
 Group create/publish, bulk membership/sync, account renaming, password repair,

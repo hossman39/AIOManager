@@ -5,7 +5,10 @@ import { setTimeout as delay } from 'node:timers/promises'
 const image = process.argv[2]
 if (!image) throw new Error('Pass the locally built image tag')
 let container
-const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', timeout: 60_000 }).trim()
+const docker = (...args) => execFileSync('docker', args, {
+  encoding: 'utf8',
+  timeout: ['create', 'start', 'restart'].includes(args[0]) ? 240_000 : 60_000,
+}).trim()
 
 async function waitHealthy() {
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -21,8 +24,9 @@ async function waitHealthy() {
 
 try {
   // No egress and no host data mount: this image cannot contact client services.
-  container = docker('run', '--detach', '--network', 'none', '--env', 'DB_TYPE=sqlite', image)
+  container = docker('create', '--pull', 'never', '--network', 'none', '--env', 'DB_TYPE=sqlite', '--env', 'ALLOW_NEW_MANAGERS=true', image)
   assert.match(container, /^[a-f0-9]{64}$/)
+  docker('start', container)
   await waitHealthy()
   assert.equal(docker('exec', container, 'node', '-p', 'process.getuid()'), '1000')
   const save = `

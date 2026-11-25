@@ -38,14 +38,23 @@ const groupDraft = {
 const term = {
   mode: { const: 'term' },
   local: { type: 'string', examples: ['2027-01-15'] },
-  timezone: { type: 'string', examples: ['America/New_York'] },
+  timezone: {
+    type: 'string',
+    deprecated: true,
+    description:
+      'Used only to validate legacy local date-time input. The admin membership timezone controls the cutoff.',
+    examples: ['America/New_York'],
+  },
   offset: {
     type: 'number',
     description: 'Optional for legacy date-time requests to disambiguate a repeated local time.',
   },
 }
 const membership = {
-  oneOf: [object({ mode: { const: 'lifetime' } }), object(term, ['mode', 'local'])],
+  oneOf: [
+    object({ mode: { enum: ['lifetime', 'add-year', 'start-year'] } }),
+    object(term, ['mode', 'local']),
+  ],
 }
 const schemas = {
   Account: {
@@ -94,7 +103,7 @@ const schemas = {
   Version: object({ expectedVersion: version }),
   Membership: {
     oneOf: [
-      object({ expectedVersion: version, mode: { const: 'lifetime' } }),
+      object({ expectedVersion: version, mode: { enum: ['lifetime', 'add-year', 'start-year'] } }),
       object({ expectedVersion: version, ...term }, ['expectedVersion', 'mode', 'local']),
     ],
   },
@@ -249,7 +258,7 @@ export function apiDocument(applicationVersion, actions) {
   add(
     'post',
     '/accounts/{id}/membership',
-    'Set dated or lifetime membership. A manual account access override takes precedence.',
+    'Set a membership or add 12 months from the later of the saved expiry date or local today. A manual account access override takes precedence.',
     { action: 'membership', input: ref('Membership'), output: ref('AccountResult') }
   )
   add('post', '/accounts/bulk-membership', 'Set membership for a versioned account selection', {
@@ -427,6 +436,7 @@ export function apiDocument(applicationVersion, actions) {
       capabilities: { type: 'object', additionalProperties: { type: 'boolean' } },
       writePaused: { type: 'boolean' },
       ownerWritePaused: { type: 'boolean' },
+      membershipTimezone: text,
       writerReady: { type: 'boolean' },
       lastScanAt: nullable(integer),
       lastBackupAt: nullable(integer),
@@ -459,7 +469,7 @@ export function apiDocument(applicationVersion, actions) {
     info: {
       title: 'AIOManager integration API',
       version: '1.0.0',
-      description: `Application ${applicationVersion}. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the saved IANA timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect.`,
+      description: `Application ${applicationVersion}. Timestamps are Unix milliseconds. Membership local is the inclusive expiry date (YYYY-MM-DD) in the admin membership timezone. The at timestamp is the exclusive end of that day. HTTPS is required for remote use. No billing or IPTV operations. Persist each mutation intent/key before sending. Poll jobs until verified; failed is not proof of no external effect.`,
     },
     servers: [{ url: '/api/v1' }],
     security: [{ bearerAuth: [] }],

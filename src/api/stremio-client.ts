@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 import { AddonDescriptor } from '@/types/addon'
 import { LibraryItem } from '@/types/activity'
 import axios, { AxiosInstance } from 'axios'
@@ -41,6 +42,11 @@ export class StremioClient {
         'Content-Type': 'application/json',
       },
       timeout: 30000,
+    })
+    this.serverClient.interceptors.request.use(async config => {
+      const headers = await managerHeaders()
+      for (const [name, value] of Object.entries(headers)) config.headers.set(name, value)
+      return config
     })
   }
 
@@ -264,16 +270,20 @@ export class StremioClient {
     // Use internal proxy only for URLs that need it (most addon servers don't have CORS headers)
     const fetchUrl = shouldFetchDirectly
       ? finalManifestUrl
-      : `/api/meta-proxy?url=${encodeURIComponent(finalManifestUrl)}`
+      : '/api/meta-proxy'
 
     try {
       console.log(
-        `[Manifest Fetch] Fetching ${shouldFetchDirectly ? 'directly' : 'via proxy'}: ${manifestUrl}`
+        `[Manifest Fetch] Fetching ${shouldFetchDirectly ? 'directly' : 'via proxy'}`
       )
 
       const response = await resilientFetch(fetchUrl, {
         timeout: 15000,
-        headers: shouldFetchDirectly ? {} : { 'x-account-context': accountContext },
+        ...(shouldFetchDirectly ? {} : {
+          method: 'POST', redirect: 'error',
+          headers: { ...await managerHeaders(), 'Content-Type':'application/json', 'x-account-context': accountContext },
+          body: JSON.stringify({url: finalManifestUrl}),
+        }),
         retries: retries
       })
 
@@ -285,7 +295,7 @@ export class StremioClient {
       const manifestData = await response.json()
 
       if (!manifestData?.id || !manifestData?.name || !manifestData?.version) {
-        console.error(`[Manifest Fetch] Missing fields for ${manifestUrl}:`, manifestData)
+        console.error(`[Manifest Fetch] Missing required manifest fields.`, manifestData)
         throw new Error('Invalid addon manifest - missing required fields')
       }
 

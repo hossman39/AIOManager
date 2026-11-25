@@ -316,6 +316,10 @@ export function getCinemetaPosterUrl(itemId: string): string {
  */
 export function isProxyableUrl(url: string | undefined): boolean {
   if (!url) return false
-  const PROXYABLE_DOMAINS = ['metahub.space', 'strem.io']
-  return PROXYABLE_DOMAINS.some(domain => url.includes(domain))
+  try {
+    const target = new URL(url)
+    return target.protocol === 'https:' && /(^|\.)(metahub\.space|strem\.io)$/.test(target.hostname)
+  } catch {
+    return false
+  }
 }

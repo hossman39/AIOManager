@@ -44,7 +44,7 @@ async function fixture(t, live = false) {
       logger: false,
       serveStatic: false,
       fetch: noNetwork,
-      httpClient: { post: noNetwork },
+      publicRequest: noNetwork,
       manifestService: { close: async () => {}, validateManifests: async () => true },
       ...(live
         ? { stremioProvider: createStremioProvider({ fetch: fake.fetch, spacingMs: 0 }) }
@@ -191,7 +191,7 @@ test('HTTP mutations replay after lost responses and restart; token rotation ret
     memberKey
   )
   assert.equal(saved.statusCode, 200, saved.body)
-  assert.equal(saved.json().account.expiry.timezone, 'Asia/Kathmandu')
+  assert.equal(saved.json().account.expiry.timezone, 'America/New_York')
   assert.equal(
     (await request(app, original.token, 'POST', `/accounts/${id}/membership`, membership))
       .statusCode,
@@ -221,7 +221,7 @@ test('HTTP mutations replay after lost responses and restart; token rotation ret
   assert.equal(
     (await request(restarted.app, next.token, 'GET', `/receipts/membership/${memberKey}`)).json()
       .account.expiry.timezone,
-    'Asia/Kathmandu'
+    'America/New_York'
   )
 })
 

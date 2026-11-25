@@ -207,8 +207,9 @@ function AccountWorkspace({ api, id }: { api: Api; id: string }) {
           onSetup={() => setTab(account.membershipType === 'unset' ? 'membership' : 'sync')}
         />
       )}
-      {tab === 'membership' && (
+      {tab === 'membership' && status && (
         <MembershipEditor
+          timezone={status.membershipTimezone}
           api={api}
           account={account}
           onReloaded={updated}

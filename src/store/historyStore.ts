@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 import { create } from 'zustand'
 import localforage from 'localforage'
 import axios from 'axios'
@@ -49,8 +50,8 @@ export const useHistoryStore = create<HistoryStore>((set, get) => ({
 
                     // Fetch for all accounts via Promise.all
                     const accountStore = (await import('@/store/accountStore')).useAccountStore.getState()
-                    const promiseResults = await Promise.all(accountStore.accounts.map(account =>
-                        axios.get(`${apiPath}/autopilot/history/${account.id}`).catch(() => null)
+                    const promiseResults = await Promise.all(accountStore.accounts.map(async account =>
+                        axios.get(`${apiPath}/autopilot/history/${account.id}`, { headers: await managerHeaders(account.id) }).catch(() => null)
                     ))
 
                     promiseResults.forEach((response) => {
@@ -111,10 +112,10 @@ export const useHistoryStore = create<HistoryStore>((set, get) => ({
                 const apiPath = baseUrl.startsWith('http') ? `${baseUrl.replace(/\/$/, '')}/api` : '/api'
 
                 const accountStore = (await import('@/store/accountStore')).useAccountStore.getState()
-                await Promise.all(accountStore.accounts.map(account =>
+                await Promise.all(accountStore.accounts.map(async account =>
                     axios.delete(`${apiPath}/autopilot/history/${account.id}`, {
-                        headers: { 'x-sync-password': auth.password }
-                    }).catch(console.warn)
+                        headers: await managerHeaders(account.id)
+                    }).catch(() => console.warn("History clear failed"))
                 ))
             }
         } catch (err) {

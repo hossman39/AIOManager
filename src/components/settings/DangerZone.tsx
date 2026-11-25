@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 import { useState } from 'react'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -97,7 +98,7 @@ export function DangerZone() {
                                 const baseUrl = serverUrl || ''
                                 const apiPath = baseUrl.startsWith('http') ? `${baseUrl.replace(/\/$/, '')}/api` : '/api'
                                 const axios = (await import('axios')).default
-                                await axios.delete(`${apiPath}/autopilot/account/${accountId}`)
+                                await axios.delete(`${apiPath}/autopilot/account/${accountId}`, { headers: await managerHeaders(accountId) })
                             }
                         } catch (e) {
                             console.warn(`[Settings] Failed to purge server rules for ${accountId}:`, e)

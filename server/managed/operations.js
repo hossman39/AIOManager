@@ -6,6 +6,8 @@ import { ManagedError } from './errors.js'
 import { activationManifests, providerIdentityKey, readExecutionPolicy } from './execution.js'
 import { awaitingGroupSync, currentAccountTarget, membershipSyncCause } from './entitlement.js'
 import { projectManagedCollection } from './projection.js'
+import { validMembershipTimezone } from '../../shared/membership-expiry.js'
+import { rezoneMemberships } from './membership-timezone.js'
 
 const context = (owner, id, purpose) => ({ owner, id, purpose })
 const versionInput = z.strictObject({ expectedVersion: z.number().int().positive() })
@@ -17,11 +19,18 @@ const activationInput = versionInput.extend({
   receipt: z.string().min(1).max(32_768),
   allowEmpty: z.boolean().default(false),
 })
-const settingsInput = z.strictObject({
+const syncSettingsInput = z.strictObject({
   expectedVersion: z.number().int().positive().nullable(),
   writePaused: z.boolean(),
   safeMode: z.boolean(),
 })
+const settingsInput = z.union([
+  syncSettingsInput,
+  z.strictObject({
+    expectedVersion: syncSettingsInput.shape.expectedVersion,
+    membershipTimezone: z.string().max(100),
+  }),
+])
 const parse = (schema, input) => {
   const result = schema.safeParse(input)
   if (!result.success) throw new ManagedError('INVALID_INPUT')
@@ -405,19 +414,26 @@ export function createManagedOperations({
     },
     async setSettings(auth, input, key) {
       const value = parse(settingsInput, input)
-      if (!value.writePaused) requireRuntime()
+      if (value.writePaused === false) requireRuntime()
+      if ('membershipTimezone' in value && !validMembershipTimezone(value.membershipTimezone))
+        throw new ManagedError('INVALID_TIMEZONE')
       return ownerTransaction(auth, (tx, owner, settings, timestamp) =>
         idempotent(tx, owner, 'settings.save', key, value, timestamp, async () => {
           if (settings.version !== (value.expectedVersion ?? 1))
             throw new ManagedError('VERSION_CONFLICT')
+          const timezone = value.membershipTimezone ?? settings.membership_timezone
+          if (timezone !== settings.membership_timezone)
+            await rezoneMemberships(tx, owner, timezone, timestamp)
+          const writePaused = value.writePaused ?? settings.write_paused === 1
+          const safeMode = value.safeMode ?? settings.safe_mode === 1
           await tx.run(
-            'UPDATE managed_owners SET write_paused = $1, safe_mode = $2, version = version + 1, updated_at = $3 WHERE owner_id = $4',
-            [Number(value.writePaused), Number(value.safeMode), timestamp, owner]
+            'UPDATE managed_owners SET write_paused = $1, safe_mode = $2, version = version + 1, updated_at = $3, membership_timezone = $5 WHERE owner_id = $4',
+            [Number(writePaused), Number(safeMode), timestamp, owner, timezone]
           )
           return {
             version: settings.version + 1,
-            writePaused: value.writePaused,
-            safeMode: value.safeMode,
+            writePaused,
+            safeMode,
             replayed: false,
           }
         })

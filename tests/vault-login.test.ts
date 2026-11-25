@@ -100,6 +100,7 @@ test('registration publishes the actual vault salt and works in a fresh browser'
   )
   await useSyncStore.getState().register(password)
   const owner = useSyncStore.getState().auth.id
+  assert.equal(JSON.parse(localStorage.getItem('stremio-manager-sync')!).state.auth.password, '')
   const originalKey = useAuthStore.getState().encryptionKey!
   assert.ok(originalKey)
   assert.equal(initialState.salt, btoa(String.fromCharCode(...loadSalt()!)))
@@ -285,4 +286,16 @@ test('a failed saved-login completion preserves the original account and stored 
   assert.deepEqual(useAccountStore.getState().accounts, [account])
   assert.deepEqual(stored.get('stremio-manager:accounts'), [account])
   assert.equal(sync.mock.callCount(), 0)
+})
+
+
+test('loading an old manager identity scrubs the saved password even when the vault is locked', async () => {
+  const { syncStorage } = await import('../src/store/safe-storage')
+  const name = 'stremio-manager-sync'
+  localStorage.setItem(name, JSON.stringify({ state: { auth: { id: 'legacy-test', password, isAuthenticated: true } } }))
+  sessionStorage.clear()
+  const record = await syncStorage()!.getItem(name)
+  assert.ok(record)
+  assert.equal(JSON.parse(localStorage.getItem(name)!).state.auth.password, '')
+  assert.equal(sessionStorage.getItem(name), null)
 })

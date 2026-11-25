@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 import { create } from 'zustand'
 import localforage from 'localforage'
 import { useAccountStore } from '@/store/accountStore'
@@ -95,14 +96,14 @@ const syncRuleToServer = async (rule: FailoverRule) => {
                 ? ''
                 : (rule.webhookUrl || useFailoverStore.getState().webhook.url),
             cooldown_ms: rule.cooldown_ms
-        })
+        }, { headers: await managerHeaders() })
         console.log(`[Autopilot] Rule ${rule.id} synced to server (Live Mode).`)
     } catch (err) {
-        console.error('[Autopilot] Server sync failed:', err)
+        console.error('[Autopilot] Server sync failed.')
     }
 }
 
-const deleteRuleFromServer = async (ruleId: string) => {
+const deleteRuleFromServer = async (ruleId: string, accountId?: string) => {
     try {
         const { useSyncStore } = await import('@/store/syncStore')
         const { auth, serverUrl } = useSyncStore.getState()
@@ -111,10 +112,10 @@ const deleteRuleFromServer = async (ruleId: string) => {
         const baseUrl = serverUrl || ''
         const apiPath = baseUrl.startsWith('http') ? `${baseUrl.replace(/\/$/, '')}/api` : '/api'
 
-        await axios.delete(`${apiPath}/autopilot/${ruleId}`)
+        await axios.delete(`${apiPath}/autopilot/${ruleId}`, { headers: await managerHeaders(accountId) })
         console.log(`[Autopilot] Rule ${ruleId} deleted from server.`)
     } catch (err) {
-        console.error('[Autopilot] Server deletion failed:', err)
+        console.error('[Autopilot] Server deletion failed.')
     }
 }
 
@@ -174,7 +175,7 @@ export const useFailoverStore = create<FailoverStore>((set, get) => ({
 
                     for (const accountId of accountIds) {
                         try {
-                            const resp = await axios.get(`${apiPath}/autopilot/state/${accountId}`)
+                            const resp = await axios.get(`${apiPath}/autopilot/state/${accountId}`, { headers: await managerHeaders(accountId) })
                             const serverStates = resp.data?.states || []
                             const serverHeartbeat = resp.data?.lastWorkerRun
 
@@ -316,7 +317,7 @@ export const useFailoverStore = create<FailoverStore>((set, get) => ({
 
             for (const accountId of accountIds) {
                 try {
-                    const resp = await axios.get(`${apiPath}/autopilot/state/${accountId}`)
+                    const resp = await axios.get(`${apiPath}/autopilot/state/${accountId}`, { headers: await managerHeaders(accountId) })
                     const serverStates = resp.data?.states || []
                     const serverHeartbeat = resp.data?.lastWorkerRun
 
@@ -446,10 +447,11 @@ export const useFailoverStore = create<FailoverStore>((set, get) => ({
     },
 
     removeRule: async (ruleId) => {
+        const accountId = get().rules.find(rule => rule.id === ruleId)?.accountId
         const rules = get().rules.filter(r => r.id !== ruleId)
         set({ rules })
         await localforage.setItem(STORAGE_KEY, rules)
-        await deleteRuleFromServer(ruleId)
+        await deleteRuleFromServer(ruleId, accountId)
         const { useSyncStore } = await import('@/store/syncStore')
         useSyncStore.getState().syncToRemote(true).catch(console.error)
     },
@@ -716,7 +718,7 @@ export const useFailoverStore = create<FailoverStore>((set, get) => ({
             if (finalRules.length !== updatedRules.length) {
                 const deletedRules = updatedRules.filter(r => r.priorityChain.length < 1)
                 for (const dr of deletedRules) {
-                    await deleteRuleFromServer(dr.id)
+                    await deleteRuleFromServer(dr.id, dr.accountId)
                 }
                 set({ rules: finalRules })
                 await localforage.setItem(STORAGE_KEY, finalRules)

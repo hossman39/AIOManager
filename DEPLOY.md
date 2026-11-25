@@ -4,23 +4,54 @@ Release images belong to `ghcr.io/hossman39/aiomanager`. Use the image digest or
 `sha-<full-commit>` from the tested release. Never substitute the original upstream
 image for this fork or use an unattended `latest` update.
 
-## Upgrade to 2.3.1
+## Upgrade to 2.3.2
 
 Pull the public image from the fork. Docker selects AMD64 or ARM64 for your host.
 
 ```sh
-docker pull ghcr.io/hossman39/aiomanager:2.3.1
+docker pull ghcr.io/hossman39/aiomanager:2.3.2
 ```
 
-Use `ghcr.io/hossman39/aiomanager:2.3.1` as the image in your existing Portainer
+Use `ghcr.io/hossman39/aiomanager:2.3.2` as the image in your existing Portainer
 stack. To pin the exact build, use the full `ghcr.io/...` value of
 `AIOMANAGER_IMAGE` in [.env.example](.env.example). If your stack already uses
 that variable, update its value in Portainer. Follow the backup and upgrade
 steps below before redeploying.
 
-On first start, dated memberships migrate automatically to the end of their saved
-local date. An automatic suspension earlier that day queues a restoration through
-managed sync. Manual access overrides continue to apply.
+In Nginx Proxy Manager, keep the existing SSL certificate and enable **Force SSL**.
+Only the proxy should be able to connect to the application port. A containerized
+proxy can use the app name and port 1610 on a shared private Docker network.
+Keep the Nginx Proxy Manager admin interface private. For a deployment with
+private admin access, allow clients to reach the existing public expiry addon at
+`/api/notice/*`, including its images and renewal page. Keep admin IP or VPN
+restrictions on the remaining routes. A proxy rule on the whole hostname also
+covers the expiry addon unless you give that path a public exception.
+
+Keep `ALLOW_NEW_MANAGERS=false` in production. Existing manager sign-in and
+adding Stremio or Nuvio customers continue to work. For a fresh manager identity,
+temporarily enable registration behind a private admin-only proxy, create the login,
+then close registration and redeploy before restoring public access.
+The runtime image uses numeric UID/GID 1000 and the Node executable. Run maintenance with the documented Node commands. An interactive shell and npm are available in the build environment only.
+Managers using an old open tab should reload once. The app removes the old
+persisted password when that browser first opens the updated UI.
+
+Open Autopilot from the original unlocked manager vault so the app can associate
+existing rules with their owner. Review existing rules, destinations and webhook URLs.
+History without any retained rule cannot be associated automatically. Keep the backup
+if you have such history. Legacy Sidekick rewritten URLs are disabled in production
+by default. Only deployments using those URLs need `ALLOW_LEGACY_SIDEKICK=true`.
+The legacy health and metadata relays and Autopilot webhooks now require a public
+network destination. Check any existing LAN-only webhooks or legacy relay URLs.
+Managed group manifest validation still has its dedicated, operator-controlled
+`MANAGED_MANIFEST_PRIVATE_ORIGINS` setting.
+Ordinary managed Stremio/Nuvio addons and expiry notices use separate routes.
+
+Check the manager timezone under **Settings ? Account sync** before resuming sync.
+Confirm an existing account displays its expected end-of-day expiry, the Autopilot
+rules open for their owner, and a previously installed notice opens on a client
+without an admin login. Keep the pre-upgrade snapshot until you have verified
+the results. For rollback, stop the new writer and restore the old image plus
+the matching database, data volume and encryption key from that snapshot.
 
 ## Previous releases
 
@@ -29,6 +60,7 @@ changed, restore the matching pre-upgrade database and encryption key with it.
 
 | Version | Build commit | Image |
 | --- | --- | --- |
+| 2.3.1 | `9aef2eb` | `ghcr.io/hossman39/aiomanager@sha256:58373a647c246ac991c52f4d54b52e719f0a0957b31218e3d34bb22fade33c17` |
 | 2.2.0 | `0e5301f` | `ghcr.io/hossman39/aiomanager@sha256:fb8f40f20264c33cbde665330bb3f318075f613ebedac4222cc8b5a82ba613b3` |
 | 2.1.0 | `9c13184` | `ghcr.io/hossman39/aiomanager@sha256:ef17a0333f627c00af87da4c128fe891c61249eeb4af28d53a1c6b9b13848ecc` |
 | 2.0.0 | `67395d1` | `ghcr.io/hossman39/aiomanager@sha256:1dec7336720ce1b9d0a1f9bff5be0533d318f3dc7833b54d0e016d4897c37d9c` |
@@ -124,7 +156,7 @@ required for encryption keys and application archives with either database engin
 
 ## Live acceptance
 
-- Health succeeds through the final HTTPS hostname. The footer shows `2.3.1` and
+- Health succeeds through the final HTTPS hostname. The footer shows `2.3.2` and
   the build commit from the release.
 - Existing accounts, memberships and groups are present after a container restart.
 - A dedicated Nuvio profile receives the correct group. Under **Follow membership**,

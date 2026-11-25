@@ -3,7 +3,8 @@ import pinoPretty from 'pino-pretty'
 import cors from '@fastify/cors'
 import fastifyStatic from '@fastify/static'
 import fastifyCompress from '@fastify/compress'
-import axiosDefault from 'axios'
+import { publicRequest } from './public-http.js'
+import { authorizeAutopilotAccount } from './autopilot-access.js'
 import { DB } from './db.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -28,7 +29,8 @@ import packageInfo from '../package.json' with { type: 'json' }
 // Construction does not bind a port, install signal handlers, or start jobs.
 export async function buildServer(options = {}) {
   const env = options.env || process.env
-  const axios = options.httpClient || axiosDefault
+  const relay = options.publicRequest ?? publicRequest
+  const registrationOpen = env.ALLOW_NEW_MANAGERS === 'true' || (env.ALLOW_NEW_MANAGERS === undefined && env.NODE_ENV !== 'production')
   const fetch = options.fetch || globalThis.fetch
   let PRIMARY_KEY = options.encryptionKey || env.ENCRYPTION_KEY
   let FALLBACK_KEYS = []
@@ -124,26 +126,8 @@ export async function buildServer(options = {}) {
   }
 
   // Log Helper: Privacy-safe URL truncation (redacts user-specific path segments)
-  const truncateUrl = (url, maxLen = 80) => {
-    try {
-      const u = new URL(url)
-      const pathParts = u.pathname.split('/').filter(Boolean)
-
-      // Helper to mask sensitive-looking segments (Long segments or Alphanumeric hashes)
-      const maskSegment = (seg) => {
-        if (!seg) return ''
-        // Mask if > 12 chars OR contains both numbers and letters (common for tokens)
-        if (seg.length > 12 || (/[0-9]/.test(seg) && /[a-zA-Z]/.test(seg))) {
-          return `${seg.substring(0, 4)}***${seg.substring(seg.length - 4)}`
-        }
-        return seg
-      }
-
-      const safePath = pathParts.length > 0 ? `/${maskSegment(pathParts[0])}` : ''
-      return `${u.protocol}//${u.host}${safePath}${u.pathname.length > safePath.length ? '/...' : ''}`
-    } catch (e) {
-      return url.substring(0, maxLen) + '...'
-    }
+  const truncateUrl = (value) => {
+    try { return new URL(value).origin } catch { return '[invalid URL]' }
   }
 
   // Log Helper: Mask account context for privacy (Zero-Knowledge compliance)
@@ -219,7 +203,8 @@ export async function buildServer(options = {}) {
   const fastify = Fastify({
     logger: loggerConfig,
     logController: new LogController({ disableRequestLogging: true }),
-    bodyLimit: parseInt(env.MAX_SYNC_PAYLOAD_SIZE || '104857600'),
+    bodyLimit: 2 * 1024 ** 2,
+    requestTimeout: 30000,
   })
 
   try {
@@ -511,8 +496,43 @@ export async function buildServer(options = {}) {
 
     // Register CORS
     // Supports CORS_ORIGINS env var: comma-separated list of allowed origins.
-    // Falls back to origin: true (allow all) when unset — safe for self-hosted setups.
-    const corsOrigins = env.CORS_ORIGINS ? env.CORS_ORIGINS.split(',').map((o) => o.trim()) : true
+    const corsOrigins = env.CORS_ORIGINS ? env.CORS_ORIGINS.split(',').map((o) => o.trim()) : env.NODE_ENV !== 'production'
+    // Count authentication failures by socket peer. Forwarded IP headers are
+    // user-controlled unless a specific reverse proxy has been configured.
+    const failures = new Map()
+    const failureKey = (request) => {
+      const route = request.routeOptions.url
+      if (!route?.startsWith('/api/') || route.startsWith('/api/notice/') || route.startsWith('/api/v1/')) return null
+      const id = route === '/api/sync/:id' ? request.params.id : request.headers['x-manager-id']
+      if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) return null
+      return request.ip + '/' + id
+    }
+    fastify.addHook('onRequest', async (request, reply) => {
+      const entry = failures.get(failureKey(request))
+      if (entry?.until > Date.now() && entry.count >= 30)
+        return reply.header('Retry-After', String(Math.ceil((entry.until - Date.now()) / 1000)))
+          .code(429).send({ error: 'Too many authentication failures' })
+    })
+    fastify.addHook('onResponse', async (request, reply) => {
+      if (reply.statusCode !== 401) return
+      const key = failureKey(request)
+      if (!key) return
+      const now = Date.now()
+      const entry = failures.get(key)
+      if (entry?.until > now) entry.count++
+      else {
+        if (failures.size >= 4096) failures.delete(failures.keys().next().value)
+        failures.set(key, { count: 1, until: now + 60000 })
+      }
+    })
+    fastify.addHook('onSend', async (request, reply, payload) => {
+      reply.header('X-Content-Type-Options', 'nosniff')
+        .header('Referrer-Policy', 'no-referrer')
+        .header('X-Frame-Options', 'DENY')
+      if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: http: data: blob:; font-src 'self' https: data:; connect-src 'self' https: http:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+      if (request.routeOptions.url?.startsWith('/api/')) reply.header('Cache-Control', 'no-store')
+      return payload
+    })
     await fastify.register(cors, {
       origin: corsOrigins,
     })
@@ -538,7 +558,7 @@ export async function buildServer(options = {}) {
       fastify.setNotFoundHandler((request, reply) => {
         if (request.url.startsWith('/api')) {
           reply.status(404)
-          return { error: `API route ${request.method}:${request.url} not found` }
+          return { error: 'Unknown API route' }
         }
         return reply.sendFile('index.html')
       })
@@ -610,6 +630,7 @@ export async function buildServer(options = {}) {
     fastify.get('/api/config', async (request, reply) => {
       return {
         customHtml: env.CUSTOM_HTML || null,
+        registrationOpen,
       }
     })
 
@@ -642,7 +663,7 @@ export async function buildServer(options = {}) {
         }
 
         try {
-          const row = await db.get('SELECT value, password FROM kv_store WHERE key = $1', [id])
+          const row = await db.get('SELECT password FROM kv_store WHERE key = $1', [id])
 
           if (!row) {
             reply.status(404)
@@ -656,6 +677,12 @@ export async function buildServer(options = {}) {
             reply.status(401)
             return { error: 'Unauthorized: Invalid Password' }
           }
+
+          const saved = await db.get('SELECT value, password FROM kv_store WHERE key = $1', [id])
+          if (!saved) return reply.code(404).send({ error: 'Not found' })
+          if (saved.password !== row.password && !equalSecret(decrypt(saved.password, FALLBACK_KEYS), password))
+            return reply.code(401).send({ error: 'Unauthorized' })
+          Object.assign(row, saved)
 
           // 2. Decrypt value for client (Silent migration fallback)
           const decryptedValueStr = decrypt(row.value, FALLBACK_KEYS)
@@ -690,7 +717,7 @@ export async function buildServer(options = {}) {
             } catch (e) {
               fastify.log.warn(
                 { category: 'Sync' },
-                `[${id}] Failed to parse sync data: ${e.message}`
+                `[${id}] Failed to parse saved sync data`
               )
               syncData = {}
             }
@@ -699,217 +726,62 @@ export async function buildServer(options = {}) {
         } catch (err) {
           fastify.log.error({ category: 'Sync' }, `[${id}] GET Error: ${err.message}`)
           reply.status(500)
-          return { error: 'Server error, please try again later.', details: err.message }
+          return { error: 'Server error, please try again later.' }
         }
       }
     )
 
-    // SECURITY: SSRF Protection
-    const isSafeUrl = (url) => {
+    const requireManager = (request) => managedRepository.authorize({
+      owner: request.headers['x-manager-id'],
+      token: request.headers['x-sync-password'],
+    })
+    const providerOrigins = new Set([
+      'https://api.real-debrid.com', 'https://api.torbox.app',
+      'https://api.alldebrid.com', 'https://debrid-link.com',
+    ])
+    const relayInput = { type: 'object', required: ['url'], properties: { url: { type: 'string', maxLength: 16384 } } }
+    const relayQuery = { schema: { querystring: relayInput } }
+    const relayBody = { bodyLimit: 20 * 1024, schema: { body: relayInput } }
+    const metadata = async (request, reply) => {
+      await requireManager(request)
+      const { url } = request.body ?? request.query
       try {
-        const u = new URL(url)
-        if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
-
-        // Block private/internal ranges
-        const hostname = u.hostname
-        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false
-        if (
-          hostname.startsWith('192.168.') ||
-          hostname.startsWith('10.') ||
-          /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
-        )
-          return false
-
-        // Fast-Fail Video Extensions (Anti-Abuse)
-        if (u.pathname.match(/\.(mp4|mkv|avi|mov|wmv|flv|webm)$/i)) return false
-
-        return true
-      } catch (e) {
-        return false
+        const headers = { Accept: 'application/json' }
+        const token = request.headers['x-provider-authorization']
+        if (providerOrigins.has(new URL(url).origin) && typeof token === 'string' && token.startsWith('Bearer '))
+          headers.Authorization = token
+        const response = await enqueueProxyRequest(url, () => relay(url, { headers }))
+        if (!response.ok) return reply.code(502).send({ error: 'Metadata upstream unavailable' })
+        return reply.type('application/json').send(JSON.stringify(await response.json()))
+      } catch {
+        return reply.code(502).send({ error: 'Metadata upstream unavailable' })
       }
     }
+    fastify.get('/api/meta-proxy', relayQuery, metadata)
+    fastify.post('/api/meta-proxy', relayBody, metadata)
 
-    // PROXY: Simple Metadata/Manifest Proxy (Secured)
-    fastify.get(
-      '/api/meta-proxy',
-      {
-        schema: {
-          querystring: {
-            type: 'object',
-            required: ['url'],
-            properties: {
-              url: { type: 'string' },
-            },
-          },
-        },
-      },
-      async (request, reply) => {
-        const { url } = request.query
-        const accountContext = request.headers['x-account-context'] || 'Unknown'
-        fastify.log.info(
-          { category: 'MetaProxy' },
-          `[${maskContext(accountContext)}] Proxying request to: ${truncateUrl(url)}`
-        )
-
-        if (!isSafeUrl(url)) {
-          fastify.log.warn(
-            { category: 'Security' },
-            `blocked unsafe proxy request: ${truncateUrl(url)}`
-          )
-          reply.status(403)
-          return { error: 'Access Denied: Unsafe URL' }
-        }
-
-        return enqueueProxyRequest(url, async () => {
-          try {
-            const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 6000) // 6s timeout
-
-            const response = await fetch(url, {
-              signal: controller.signal,
-              headers: {
-                'User-Agent': `AIOManager/${VERSION} (Internal Proxy; Hardened)`,
-                Accept: 'application/json, text/plain, */*',
-                ...(request.headers['authorization']
-                  ? { Authorization: request.headers['authorization'] }
-                  : {}),
-              },
-            })
-
-            clearTimeout(timeout)
-
-            if (!response.ok) {
-              reply.status(response.status)
-              return { error: `Upstream returned ${response.status}` }
-            }
-
-            // 1. Content-Type Check (Allow JSON/Text/Web, block Media)
-            const contentType = response.headers.get('content-type') || ''
-            if (contentType.startsWith('video/') || contentType.startsWith('audio/')) {
-              reply.status(415)
-              return { error: 'Unsupported Media Type' }
-            }
-            if (contentType) reply.type(contentType)
-
-            // 2. Size Limit Check (5MB)
-            const contentLength = parseInt(response.headers.get('content-length') || '0')
-            if (contentLength > 5 * 1024 * 1024) {
-              reply.status(413)
-              return { error: 'Payload Too Large (>5MB)' }
-            }
-
-            // FIX: Fastify/Compress doesn't handle Web ReadableStream well, convert to Buffer
-            const arrayBuffer = await response.arrayBuffer()
-            const buffer = Buffer.from(arrayBuffer)
-
-            // Double-check buffer size just in case content-length was missing/fake
-            if (buffer.length > 5 * 1024 * 1024) {
-              reply.status(413)
-              return { error: 'Payload Too Large (>5MB)' }
-            }
-
-            return buffer
-          } catch (err) {
-            if (err.name === 'AbortError') {
-              fastify.log.error({ category: 'MetaProxy' }, `Timeout after 6s: ${truncateUrl(url)}`)
-              reply.status(504)
-              return {
-                error: 'Gateway Timeout',
-                details: 'Upstream addon took too long to respond (>6s)',
-              }
-            }
-            fastify.log.error(
-              { category: 'MetaProxy' },
-              `Failed to fetch ${truncateUrl(url)}: ${err.message}`
-            )
-            reply.status(500)
-            return { error: 'Internal Proxy Error', details: err.message }
-          }
-        })
+    fastify.get('/api/proxy-image', relayQuery, async (request, reply) => {
+      const { url } = request.query
+      try {
+        const target = new URL(url)
+        if (target.protocol !== 'https:' || target.port || !/(^|\.)(metahub\.space|strem\.io)$/.test(target.hostname))
+          return reply.code(403).send({ error: 'Unsupported poster origin' })
+        const response = await enqueueProxyRequest(url, () => relay(url, { headers: { Accept: 'image/*' } }))
+        const type = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
+        if (!response.ok) return reply.code(502).send({ error: 'Image upstream unavailable' })
+        if (!['image/png','image/jpeg','image/gif','image/webp','image/avif','image/x-icon'].includes(type))
+          return reply.code(415).send({ error: 'Unsupported image format' })
+        return reply.type(type).send(Buffer.from(await response.arrayBuffer()))
+      } catch {
+        return reply.code(502).send({ error: 'Image upstream unavailable' })
       }
-    )
-
-    // PROXY: Image Relayer (For html2canvas CORS bypass)
-    fastify.get(
-      '/api/proxy-image',
-      {
-        schema: {
-          querystring: {
-            type: 'object',
-            required: ['url'],
-            properties: {
-              url: { type: 'string' },
-            },
-          },
-        },
-      },
-      async (request, reply) => {
-        const { url } = request.query
-
-        if (!isSafeUrl(url)) {
-          reply.status(403)
-          return { error: 'Access Denied: Unsafe URL' }
-        }
-
-        try {
-          const controller = new AbortController()
-          const timeout = setTimeout(() => controller.abort(), 10000)
-
-          const response = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': `AIOManager/${VERSION} (Image Proxy)`,
-              Accept: 'image/*',
-            },
-          })
-
-          clearTimeout(timeout)
-
-          if (!response.ok) {
-            reply.status(response.status)
-            return { error: `Upstream returned ${response.status}` }
-          }
-
-          const contentType = response.headers.get('content-type') || ''
-          if (!contentType.startsWith('image/')) {
-            reply.status(415)
-            return { error: 'Unsupported Media Type: Not an image' }
-          }
-
-          const contentLength = parseInt(response.headers.get('content-length') || '0')
-          if (contentLength > 10 * 1024 * 1024) {
-            reply.status(413)
-            return { error: 'Payload Too Large (>10MB)' }
-          }
-
-          const arrayBuffer = await response.arrayBuffer()
-          const buffer = Buffer.from(arrayBuffer)
-
-          if (buffer.length > 10 * 1024 * 1024) {
-            reply.status(413)
-            return { error: 'Payload Too Large (>10MB)' }
-          }
-
-          reply.header('Access-Control-Allow-Origin', '*')
-          reply.header('Cache-Control', 'public, max-age=31536000')
-          reply.type(contentType)
-
-          return buffer
-        } catch (err) {
-          fastify.log.error(
-            { category: 'Proxy' },
-            `Failed to fetch image proxy ${url}: ${err.message}`
-          )
-          reply.status(500)
-          return { error: 'Image Proxy Error' }
-        }
-      }
-    )
+    })
 
     // PROXY: Stremio API Proxy (Enables backend logging of Stremio activities)
     fastify.post(
       '/api/stremio-proxy',
       {
+        onRequest: async (request) => { await requireManager(request) },
         schema: {
           body: {
             type: 'object',
@@ -946,7 +818,7 @@ export async function buildServer(options = {}) {
           // Strict Whitelist: Block unknown methods to prevent abuse
           fastify.log.warn(
             { category: 'Security' },
-            `[Proxy] Blocked unauthorized Stremio API call: ${type}`
+            `[Proxy] Blocked unauthorized Stremio API call`
           )
           reply.status(403)
           return { error: 'Method Not Allowed' }
@@ -1001,6 +873,11 @@ export async function buildServer(options = {}) {
     fastify.post(
       '/api/sync/:id',
       {
+        onRequest: async (request) => {
+          if (!registrationOpen)
+            await managedRepository.authorize({ owner: request.params.id, token: request.headers['x-sync-password'] })
+        },
+        bodyLimit: Number(env.MAX_SYNC_PAYLOAD_SIZE || 104857600),
         schema: {
           params: {
             type: 'object',
@@ -1026,22 +903,20 @@ export async function buildServer(options = {}) {
         const serverTime = new Date().toISOString()
         data.syncedAt = serverTime
 
-        const encryptedVal = encrypt(JSON.stringify(data), PRIMARY_KEY)
-        const encryptedPass = encrypt(password, PRIMARY_KEY)
-
-        // A simultaneous claim may only win once. The losing request must
-        // authenticate against the committed identity, never overwrite it.
         const authorized = await db.transaction(async (tx) => {
-          await tx.run(
-            `INSERT INTO kv_store (key, value, password, updated_at)
-            VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING`,
-            [id, encryptedVal, encryptedPass, Date.now()]
-          )
+          if (registrationOpen) {
+            await tx.run(
+              'INSERT INTO kv_store (key, value, password, updated_at) VALUES ($1,$2,$3,$4) ON CONFLICT (key) DO NOTHING',
+              [id, '{}', encrypt(password, PRIMARY_KEY), Date.now()]
+            )
+          }
           const row = await tx.get(
             `SELECT password FROM kv_store WHERE key = $1${tx.type === 'postgres' ? ' FOR UPDATE' : ''}`,
             [id]
           )
-          if (!equalSecret(decrypt(row.password, FALLBACK_KEYS), password)) return false
+          if (!row || !equalSecret(decrypt(row.password, FALLBACK_KEYS), password)) return false
+          const encryptedVal = encrypt(JSON.stringify(data), PRIMARY_KEY)
+          const encryptedPass = encrypt(password, PRIMARY_KEY)
           await tx.run(
             'UPDATE kv_store SET value = $1, password = $2, updated_at = $3 WHERE key = $4',
             [encryptedVal, encryptedPass, Date.now(), id]
@@ -1087,6 +962,12 @@ export async function buildServer(options = {}) {
             },
           }
         }
+        const retained = await tx.get(
+          'SELECT 1 AS present FROM autopilot_account_owners o WHERE o.owner_id = $1 AND (EXISTS (SELECT 1 FROM autopilot_rules r WHERE r.account_id = o.account_id) OR EXISTS (SELECT 1 FROM failover_history h WHERE h.account_id = o.account_id)) LIMIT 1',
+          [id]
+        )
+        if (retained) return { status: 409, body: { error: 'Clear the saved Autopilot rules and history before deleting this login.' } }
+        await tx.run('DELETE FROM autopilot_account_owners WHERE owner_id = $1', [id])
         await tx.run('DELETE FROM kv_store WHERE key = $1', [id])
         return { status: 200, body: { success: true } }
       })
@@ -1094,125 +975,36 @@ export async function buildServer(options = {}) {
     })
 
     // PROXY: Manifest Rewriter (Sidekick Mode)
-    fastify.all('/api/proxy/:token/*', async (request, reply) => {
-      const { token } = request.params
-      const pathSuffix = request.params['*']
-
-      // We use a dummy URL for the enqueue key since token might be large,
-      // but better to decoode it to get the domain
-      let targetDomain = 'unknown'
-      let originalUrl = ''
+    fastify.get('/api/proxy/:token/*', async (request, reply) => {
+      if (env.NODE_ENV === 'production' && env.ALLOW_LEGACY_SIDEKICK !== 'true')
+        return reply.code(404).send({ error: 'Legacy Sidekick disabled' })
       try {
-        const config = JSON.parse(Buffer.from(token, 'base64').toString('utf-8'))
-        targetDomain = new URL(config.url).origin
-        originalUrl = config.url
-      } catch (e) {
-        fastify.log.warn({ category: 'Proxy' }, `Failed to decode token: ${e.message}`)
-        reply.status(400)
-        return { error: 'Invalid Token' }
+        const config = JSON.parse(Buffer.from(request.params.token, 'base64').toString('utf8'))
+        const suffix = request.params['*']
+        const manifest = !suffix || suffix === 'manifest.json'
+        const target = manifest ? config.url : config.url.replace(/\/manifest\.json$/, '') + '/' + suffix
+        const response = await enqueueProxyRequest(target, () => relay(target, { headers: { Accept: 'application/json' } }))
+        if (!response.ok) return reply.code(502).send({ error: 'Addon unavailable' })
+        const body = await response.json()
+        if (manifest && config.name) body.name = config.name
+        if (manifest && config.logo) body.logo = config.logo
+        reply.header('Access-Control-Allow-Origin', '*')
+        return reply.type('application/json').send(JSON.stringify(body))
+      } catch {
+        return reply.code(502).send({ error: 'Addon unavailable' })
       }
-
-      // SSRF Protection for Manifest Rewriter
-      if (!isSafeUrl(originalUrl)) {
-        fastify.log.warn(
-          { category: 'Security' },
-          `blocked unsafe proxy request (Manifest Rewriter): ${truncateUrl(originalUrl)}`
-        )
-        reply.status(403)
-        return { error: 'Access Denied: Unsafe URL' }
-      }
-
-      return enqueueProxyRequest(targetDomain, async () => {
-        try {
-          // 1. Decode Token
-          const configStr = Buffer.from(token, 'base64').toString('utf-8')
-          const config = JSON.parse(configStr)
-          const { url: originalUrl, name: customName, logo: customLogo } = config
-
-          if (!originalUrl) {
-            reply.status(400)
-            return { error: 'Invalid proxy configuration' }
-          }
-
-          // 2. Resolve Target URL
-          let targetUrl
-          if (pathSuffix === 'manifest.json' || pathSuffix === '') {
-            targetUrl = originalUrl
-          } else {
-            const baseUrl = originalUrl.replace(/\/manifest\.json$/, '').replace(/\/$/, '')
-            targetUrl = `${baseUrl}/${pathSuffix}`
-          }
-
-          // 3. Fetch
-          const response = await fetch(targetUrl, {
-            method: request.method,
-            headers: {
-              'User-Agent': request.headers['user-agent'] || 'AIOManager-Proxy',
-            },
-          })
-
-          if (!response.ok) {
-            reply.status(response.status)
-            return response.statusText
-          }
-
-          // 4. Handle Manifest Modification
-          if ((pathSuffix === 'manifest.json' || pathSuffix === '') && (customName || customLogo)) {
-            const manifest = await response.json()
-            if (customName) manifest.name = customName
-            if (customLogo) manifest.logo = customLogo
-            manifest.description = (manifest.description || '') + '\n[Proxied by AIOManager]'
-            return manifest
-          }
-
-          // 5. Pass-through
-          const contentType = response.headers.get('content-type')
-          if (contentType) reply.type(contentType)
-          // FIX: Fastify/Compress doesn't handle Web ReadableStream well, convert to Buffer
-          const arrayBuffer = await response.arrayBuffer()
-          const buffer = Buffer.from(arrayBuffer)
-          return buffer
-        } catch (err) {
-          // PROXY RESILIENCE: If upstream is dead (offline), we MUST return a valid manifest
-          // so Stremio doesn't delete the addon or show garbage.
-          if ((pathSuffix === 'manifest.json' || pathSuffix === '') && customName) {
-            fastify.log.warn(
-              { category: 'Proxy' },
-              `Upstream offline: ${targetDomain}. Serving fallback manifest for ${customName}.`
-            )
-            return {
-              id: 'proxy-offline-' + Date.now(),
-              name: customName,
-              version: '0.0.1',
-              description:
-                'This addon is currently offline or unreachable. The Manager is attempting to restore connection.',
-              logo: customLogo,
-              resources: [],
-              types: [],
-              catalogs: [],
-            }
-          }
-
-          fastify.log.error({ category: 'Proxy' }, `Fatal Error: ${err.message}`)
-          reply.status(502)
-          return { error: 'Proxy Error', details: 'Upstream Unreachable' }
-        }
-      })
     })
 
     // PROXY: Health Check
-    fastify.get('/api/addon-health', async (request, reply) => {
-      const { url } = request.query
+    const addonHealth = async (request, reply) => {
+      const { url } = request.body ?? request.query
 
       if (!url) {
         reply.status(400)
         return { isOnline: false, error: 'Bad Request: Missing URL' }
       }
 
-      if (!isSafeUrl(url)) {
-        reply.status(400)
-        return { isOnline: false, error: 'Bad Request: Unsafe URL' }
-      }
+      await requireManager(request)
 
       try {
         const isOnline = await checkAddonHealthInternal(url)
@@ -1220,12 +1012,14 @@ export async function buildServer(options = {}) {
       } catch (err) {
         fastify.log.error(
           { category: 'HealthProxy' },
-          `Failed to check health for ${url}: ${err.message}`
+          `Health check failed for ${truncateUrl(url)}`
         )
         reply.status(500)
         return { isOnline: false, error: 'Internal Server Error' }
       }
-    })
+    }
+    fastify.get('/api/addon-health', relayQuery, addonHealth)
+    fastify.post('/api/addon-health', relayBody, addonHealth)
 
     // --- Autopilot Engine ---
     let autopilotInterval = null
@@ -1266,7 +1060,7 @@ export async function buildServer(options = {}) {
 
             try {
               // Priority 1: HEAD
-              const res1 = await fetch(target, {
+              const res1 = await relay(target, {
                 method: 'HEAD',
                 signal: controller.signal,
                 headers: { 'User-Agent': userAgent, Accept: 'application/json, text/plain, */*' },
@@ -1276,7 +1070,7 @@ export async function buildServer(options = {}) {
                 return true
 
               // Priority 2: GET
-              const res2 = await fetch(target, {
+              const res2 = await relay(target, {
                 method: 'GET',
                 signal: controller.signal,
                 headers: { 'User-Agent': userAgent, Accept: 'application/json, text/plain, */*' },
@@ -1385,20 +1179,15 @@ export async function buildServer(options = {}) {
     /**
      * Internal manifest fetcher that respects proxy limits
      */
-    async function fetchManifestRaw(url, accountId) {
+    async function fetchManifestRaw(url) {
       try {
-        const config = {
-          headers: { 'x-stremio-account': accountId || 'autopilot-sync' },
-          timeout: 10000,
-        }
-        const response = await enqueueProxyRequest(url, config)
-        if (response.data && response.data.manifest) {
-          return response.data.manifest
-        }
-      } catch (err) {
-        // Silent fail
+        const response = await enqueueProxyRequest(url, () => relay(url))
+        if (!response.ok) return null
+        const body = await response.json()
+        return body?.id && body?.version ? body : null
+      } catch {
+        return null
       }
-      return null
     }
 
     /**
@@ -1611,7 +1400,7 @@ export async function buildServer(options = {}) {
                   { category: 'Autopilot' },
                   `[${maskContext(accountId)}] Restoration Recovery: Attempting manifest fetch for ${truncateUrl(chain[idx])}`
                 )
-                recoveredManifest = await fetchManifestRaw(chain[idx], accountId)
+                recoveredManifest = await fetchManifestRaw(chain[idx])
                 if (recoveredManifest && isSubstantial(recoveredManifest)) {
                   fastify.log.info(
                     { category: 'Autopilot' },
@@ -1797,11 +1586,13 @@ export async function buildServer(options = {}) {
             }
           }
 
-          await axios.post(webhookUrl, body)
+          const response = await relay(webhookUrl, { method: 'POST', data: body,
+            headers: { 'Content-Type': 'application/json' }, maxBytes: 65536 })
+          return response.ok
         } catch (err) {
           fastify.log.error(
             { category: 'Autopilot' },
-            `Webhook failed for ${webhookUrl.substring(0, 30)}: ${err.message}`
+            `Webhook delivery failed for ${truncateUrl(webhookUrl)}`
           )
         }
       })
@@ -2123,68 +1914,23 @@ export async function buildServer(options = {}) {
         const chainToSave = encrypt(JSON.stringify(chain), PRIMARY_KEY)
         const addonListToSave = encrypt(JSON.stringify(updatedAddonList), PRIMARY_KEY)
 
-        if (db.type === 'postgres') {
-          await db.run(
-            `
-                UPDATE autopilot_rules
-                SET active_url = $1, auth_key = $2, priority_chain = $3, stabilization = $4, addon_list = $5, last_check = $6, last_notification = $7, updated_at = $8
-                WHERE id = $9
-            `,
-            [
-              activeUrlToSave,
-              authKeyToSave,
-              chainToSave,
-              stabilizationToSave,
-              addonListToSave,
-              now,
-              lastNotificationToSave,
-              now,
-              rule.id,
-            ]
-          )
-        } else {
-          await db.run(
-            `
-                UPDATE autopilot_rules
-                SET active_url = $1, auth_key = $2, priority_chain = $3, stabilization = $4, addon_list = $5, last_check = $6, last_notification = $7, updated_at = $8
-                WHERE id = $9
-            `,
-            [
-              activeUrlToSave,
-              authKeyToSave,
-              chainToSave,
-              stabilizationToSave,
-              addonListToSave,
-              now,
-              lastNotificationToSave,
-              now,
-              rule.id,
-            ]
-          )
-        }
+        await db.run(
+          `UPDATE autopilot_rules
+           SET active_url=$1, auth_key=$2, priority_chain=$3, stabilization=$4, addon_list=$5,
+               last_check=$6, last_notification=$7, updated_at=$8
+           WHERE id=$9 AND account_id=$10 AND auth_key=$11`,
+          [activeUrlToSave, authKeyToSave, chainToSave, stabilizationToSave, addonListToSave,
+            now, lastNotificationToSave, now, rule.id, rule.account_id, rule.auth_key]
+        )
       } else {
         // Heartbeat/stats-only write: stabilization counters ticked or 5-minute heartbeat due.
         // Excludes addon_list, priority_chain, auth_key, active_url entirely.
         // On PostgreSQL this avoids TOAST rewrites — these columns are unchanged in this path.
-        if (db.type === 'postgres') {
-          await db.run(
-            `
-                UPDATE autopilot_rules
-                SET stabilization = $1, last_check = $2, last_notification = $3, updated_at = $4
-                WHERE id = $5
-            `,
-            [stabilizationToSave, now, lastNotificationToSave, now, rule.id]
-          )
-        } else {
-          await db.run(
-            `
-                UPDATE autopilot_rules
-                SET stabilization = $1, last_check = $2, last_notification = $3, updated_at = $4
-                WHERE id = $5
-            `,
-            [stabilizationToSave, now, lastNotificationToSave, now, rule.id]
-          )
-        }
+        await db.run(
+          `UPDATE autopilot_rules SET stabilization=$1, last_check=$2, last_notification=$3, updated_at=$4
+           WHERE id=$5 AND account_id=$6 AND auth_key=$7`,
+          [stabilizationToSave, now, lastNotificationToSave, now, rule.id, rule.account_id, rule.auth_key]
+        )
       }
     }
 
@@ -2315,8 +2061,31 @@ export async function buildServer(options = {}) {
         console.log(banner)
       }
 
+      const protect = (kind, handler) => async (request, reply) => {
+        const owner = await requireManager(request)
+        if (kind === 'sync' && (!request.body?.id || !request.body?.authKey || !Array.isArray(request.body.priorityChain)))
+          return reply.code(400).send({error: 'Missing required Autopilot data'})
+        if (kind === 'webhook') return handler(request, reply)
+        return db.transaction(async tx => {
+          let accountId = request.params.accountId ?? request.body?.accountId
+          if (kind === 'delete-rule') {
+            const row = await tx.get('SELECT account_id FROM autopilot_rules WHERE id = $1', [request.params.id])
+            if (!row) return {success: true}
+            accountId = row.account_id
+          }
+          const proof = request.headers['x-autopilot-proof'] ?? request.body?.authKey
+          const available = await authorizeAutopilotAccount(tx, owner, {accountId, keys:FALLBACK_KEYS}, proof, kind === 'sync')
+          if (!available) {
+            if (kind === 'state') return {states: [], lastWorkerRun}
+            if (kind === 'history') return {history: []}
+            return {success:true, deleted:0}
+          }
+          return handler(request, reply, accountId)
+        })
+      }
+
       // --- Autopilot Sync Endpoint ---
-      fastify.post('/api/autopilot/sync', async (request, reply) => {
+      fastify.post('/api/autopilot/sync', protect('sync', async (request, reply) => {
         const {
           id,
           accountId,
@@ -2363,15 +2132,14 @@ export async function buildServer(options = {}) {
                         updated_at = EXCLUDED.updated_at,
                         cooldown_ms = EXCLUDED.cooldown_ms
                     WHERE
-                        autopilot_rules.name IS DISTINCT FROM EXCLUDED.name OR
+                        autopilot_rules.account_id = excluded.account_id AND (autopilot_rules.name IS DISTINCT FROM EXCLUDED.name OR
                         autopilot_rules.auth_key IS DISTINCT FROM EXCLUDED.auth_key OR
                         autopilot_rules.priority_chain IS DISTINCT FROM EXCLUDED.priority_chain OR
                         autopilot_rules.addon_list IS DISTINCT FROM EXCLUDED.addon_list OR
                         autopilot_rules.webhook_url IS DISTINCT FROM EXCLUDED.webhook_url OR
                         autopilot_rules.is_active IS DISTINCT FROM EXCLUDED.is_active OR
                         autopilot_rules.is_automatic IS DISTINCT FROM EXCLUDED.is_automatic OR
-                        autopilot_rules.cooldown_ms IS DISTINCT FROM EXCLUDED.cooldown_ms
-                `,
+                        autopilot_rules.cooldown_ms IS DISTINCT FROM EXCLUDED.cooldown_ms)`,
             [
               id,
               accountId,
@@ -2404,15 +2172,14 @@ export async function buildServer(options = {}) {
                         updated_at = excluded.updated_at,
                         cooldown_ms = excluded.cooldown_ms
                     WHERE
-                        autopilot_rules.name != excluded.name OR
+                        autopilot_rules.account_id = excluded.account_id AND (autopilot_rules.name != excluded.name OR
                         autopilot_rules.auth_key != excluded.auth_key OR
                         autopilot_rules.priority_chain != excluded.priority_chain OR
                         autopilot_rules.addon_list != excluded.addon_list OR
                         autopilot_rules.webhook_url != excluded.webhook_url OR
                         autopilot_rules.is_active != excluded.is_active OR
                         autopilot_rules.is_automatic != excluded.is_automatic OR
-                        autopilot_rules.cooldown_ms != excluded.cooldown_ms
-                `,
+                        autopilot_rules.cooldown_ms != excluded.cooldown_ms)`,
             [
               id,
               accountId,
@@ -2430,15 +2197,17 @@ export async function buildServer(options = {}) {
           )
         }
 
+        const stored = await db.get('SELECT account_id FROM autopilot_rules WHERE id = $1', [id])
+        if (stored?.account_id !== accountId) throw Object.assign(new Error('Rule conflict'), {statusCode:409})
         fastify.log.info(
           { category: 'Autopilot' },
           `[${maskContext(accountId)}] Rule synced to server (Swap & Hide Mode).`
         )
         return { success: true }
-      })
+      }))
 
       // --- Get Autopilot Active States (so frontend can sync with server) ---
-      fastify.get('/api/autopilot/state/:accountId', async (request, reply) => {
+      fastify.get('/api/autopilot/state/:accountId', protect('state', async (request, reply) => {
         const { accountId } = request.params
 
         try {
@@ -2472,9 +2241,9 @@ export async function buildServer(options = {}) {
           )
           return { states: [], lastWorkerRun }
         }
-      })
+      }))
 
-      fastify.get('/api/autopilot/history/:accountId', async (request, reply) => {
+      fastify.get('/api/autopilot/history/:accountId', protect('history', async (request, reply) => {
         const { accountId } = request.params
         const history = await db.query(
           'SELECT * FROM failover_history WHERE account_id = $1 ORDER BY timestamp DESC LIMIT 10',
@@ -2493,22 +2262,17 @@ export async function buildServer(options = {}) {
         }))
 
         return { history: decryptedHistory }
-      })
+      }))
 
       // --- Test Webhook ---
-      fastify.post('/api/autopilot/test-webhook', async (request, reply) => {
+      fastify.post('/api/autopilot/test-webhook', protect('webhook', async (request, reply) => {
         const { webhookUrl, accountName } = request.body
         if (!webhookUrl) {
           reply.status(400)
           return { error: 'Webhook URL required' }
         }
 
-        if (!isSafeUrl(webhookUrl)) {
-          reply.status(400)
-          return { error: 'Invalid webhook URL' }
-        }
-
-        await sendNotification(webhookUrl, {
+        const delivered = await sendNotification(webhookUrl, {
           type: 'info',
           message:
             '🚀 **Connectivity Test Successful**\n\nYour AIOManager Autopilot alerts are configured correctly and active.\n\n**Environment**: High-Scale Optimization\n**Encryption**: AES-256 Verified ✅',
@@ -2516,17 +2280,18 @@ export async function buildServer(options = {}) {
           activeName: 'System Test',
         })
 
+        if (!delivered) return reply.code(502).send({ error: 'Webhook delivery failed' })
         return { success: true }
-      })
+      }))
 
-      fastify.delete('/api/autopilot/:id', async (request, reply) => {
+      fastify.delete('/api/autopilot/:id', protect('delete-rule', async (request, reply, accountId) => {
         const { id } = request.params
-        await db.run('DELETE FROM autopilot_rules WHERE id = $1', [id])
+        await db.run('DELETE FROM autopilot_rules WHERE id = $1 AND account_id = $2', [id, accountId])
         return { success: true }
-      })
+      }))
 
       // Bulk delete all autopilot rules for a specific account
-      fastify.delete('/api/autopilot/account/:accountId', async (request, reply) => {
+      fastify.delete('/api/autopilot/account/:accountId', protect('purge', async (request, reply) => {
         const { accountId } = request.params
         const result = await db.run('DELETE FROM autopilot_rules WHERE account_id = $1', [
           accountId,
@@ -2536,32 +2301,11 @@ export async function buildServer(options = {}) {
           `Bulk-deleted rules for account ${maskContext(accountId)}...`
         )
         return { success: true, deleted: result?.changes || 0 }
-      })
+      }))
 
       // New: Delete ALL autopilot history for a specific account
-      fastify.delete('/api/autopilot/history/:accountId', async (request, reply) => {
+      fastify.delete('/api/autopilot/history/:accountId', protect('clear', async (request, reply) => {
         const { accountId } = request.params
-        const password = request.headers['x-sync-password']
-
-        if (!password) {
-          reply.status(401)
-          return { error: 'Unauthorized' }
-        }
-
-        // Verify ownership: check that a kv_store row for this accountId exists with matching password
-        const row = await db.get('SELECT password FROM kv_store WHERE key = $1', [accountId])
-        if (!row) {
-          reply.status(404)
-          return { error: 'Account not found' }
-        }
-
-        // The value in kv_store for accounts is their sync password
-        const decryptedPassword = decrypt(row.password, FALLBACK_KEYS)
-        if (decryptedPassword !== password) {
-          reply.status(401)
-          return { error: 'Unauthorized' }
-        }
-
         const result = await db.run('DELETE FROM failover_history WHERE account_id = $1', [
           accountId,
         ])
@@ -2570,7 +2314,7 @@ export async function buildServer(options = {}) {
           `Cleared autopilot history for account ${maskContext(accountId)}`
         )
         return { success: true, deleted: result?.changes || 0 }
-      })
+      }))
 
       // --- Stateless Catalog Sharing removed ---
     }

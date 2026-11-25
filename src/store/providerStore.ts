@@ -1,3 +1,4 @@
+import { managerHeaders } from '@/lib/manager-headers'
 import { create } from 'zustand'
 import { ProviderHealth, ProviderState } from '@/types/provider'
 import { useVaultStore } from './vaultStore'
@@ -49,13 +50,15 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
             let status: ProviderHealth['status'] = 'active'
 
             // We use a proxy to avoid CORS issues with provider APIs
-            const proxyUrl = '/api/meta-proxy?url='
+            const proxyUrl = '/api/meta-proxy'
+            const headers = await managerHeaders()
 
             if (key.provider === 'real-debrid') {
-                const url = `${proxyUrl}${encodeURIComponent('https://api.real-debrid.com/rest/1.0/user')}`
-                const res = await axios.get(url, {
+                const url = 'https://api.real-debrid.com/rest/1.0/user'
+                const res = await axios.post(proxyUrl, { url }, {
                     headers: {
-                        Authorization: `Bearer ${key.value}`,
+                        ...headers,
+                        'x-provider-authorization': `Bearer ${key.value}`,
                         'x-account-context': 'System Check'
                     },
                 })
@@ -67,10 +70,11 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
                     status = 'expired'
                 }
             } else if (key.provider === 'torbox') {
-                const url = `${proxyUrl}${encodeURIComponent('https://api.torbox.app/v1/api/user/me?settings=true')}`
-                const res = await axios.get(url, {
+                const url = 'https://api.torbox.app/v1/api/user/me?settings=true'
+                const res = await axios.post(proxyUrl, { url }, {
                     headers: {
-                        Authorization: `Bearer ${key.value}`,
+                        ...headers,
+                        'x-provider-authorization': `Bearer ${key.value}`,
                         'x-account-context': 'System Check'
                     },
                 })
@@ -83,9 +87,9 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
                     status = 'expired'
                 }
             } else if (key.provider === 'premiumize') {
-                const url = `${proxyUrl}${encodeURIComponent('https://www.premiumize.me/api/account/info')}?apikey=${key.value}`
-                const res = await axios.get(url, {
-                    headers: { 'x-account-context': 'System Check' }
+                const url = `https://www.premiumize.me/api/account/info?apikey=${encodeURIComponent(key.value)}`
+                const res = await axios.post(proxyUrl, { url }, {
+                    headers: { ...headers, 'x-account-context': 'System Check' }
                 })
                 const data = res.data
                 if (data.status === 'success' && data.premium_until > 0) {
@@ -96,10 +100,11 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
                     daysRemaining = 0
                 }
             } else if (key.provider === 'alldebrid') {
-                const url = `${proxyUrl}${encodeURIComponent('https://api.alldebrid.com/v4/user?agent=AIOManager')}`
-                const res = await axios.get(url, {
+                const url = 'https://api.alldebrid.com/v4/user?agent=AIOManager'
+                const res = await axios.post(proxyUrl, { url }, {
                     headers: {
-                        Authorization: `Bearer ${key.value}`,
+                        ...headers,
+                        'x-provider-authorization': `Bearer ${key.value}`,
                         'x-account-context': 'System Check'
                     }
                 })
@@ -111,10 +116,11 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
                     status = 'expired'
                 }
             } else if (key.provider === 'debrid-link') {
-                const url = `${proxyUrl}${encodeURIComponent('https://debrid-link.com/api/v2/account/infos')}`
-                const res = await axios.get(url, {
+                const url = 'https://debrid-link.com/api/v2/account/infos'
+                const res = await axios.post(proxyUrl, { url }, {
                     headers: {
-                        Authorization: `Bearer ${key.value}`,
+                        ...headers,
+                        'x-provider-authorization': `Bearer ${key.value}`,
                         'x-account-context': 'System Check'
                     },
                 })
@@ -155,7 +161,7 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
                 },
             }))
         } catch (error) {
-            console.error(`Failed to refresh health for ${key.name}:`, error)
+            console.error(`Failed to refresh health for ${key.name}.`)
             set((state) => ({
                 health: {
                     ...state.health,

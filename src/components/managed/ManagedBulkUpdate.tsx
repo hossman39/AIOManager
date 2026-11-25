@@ -9,8 +9,9 @@ import {
   type BulkMembership,
   type GroupMemberSelection,
 } from '@/api/managed'
-import { resolveExpiryDate, MEMBERSHIP_TIMEZONE } from '../../../shared/membership-expiry.js'
+import { resolveExpiryDate } from '../../../shared/membership-expiry.js'
 import { GroupMemberDialog } from './GroupMemberDialog'
+import { AnnualMembershipButton } from './AnnualMembershipButton'
 import { useManagedSubmission, useUnsavedWarning } from './useManagedSubmission'
 
 type Api = ReturnType<typeof createManagedApi>
@@ -24,6 +25,7 @@ const countLabel = (count: number, noun: string) => `${count} ${noun}${count ===
 
 export function ManagedBulkUpdate({
   api,
+  timezone,
   group,
   accounts,
   onClose,
@@ -32,6 +34,7 @@ export function ManagedBulkUpdate({
   edit,
 }: {
   api: Api
+  timezone: string
   group?: ManagedGroup
   accounts: ManagedAccount[]
   onClose: () => void
@@ -45,9 +48,6 @@ export function ManagedBulkUpdate({
     original?.membershipType === 'lifetime' ? 'lifetime' : 'term'
   )
   const [local, setLocal] = useState(original?.expiry?.local.slice(0, 10) ?? '')
-  const [timezone, setTimezone] = useState<string>(
-    original?.expiry?.timezone ?? MEMBERSHIP_TIMEZONE
-  )
   const [destination, setDestination] = useState(
     edit === 'move' ? (original?.groupId ?? 'individual') : ''
   )
@@ -55,13 +55,6 @@ export function ManagedBulkUpdate({
   const [loadingGroups, setLoadingGroups] = useState(false)
   const [groupError, setGroupError] = useState('')
   const [groupRead, setGroupRead] = useState(0)
-  const zones = useMemo(() => {
-    const supported =
-      (
-        Intl as typeof Intl & { supportedValuesOf?: (kind: 'timeZone') => string[] }
-      ).supportedValuesOf?.('timeZone') ?? []
-    return [...new Set([MEMBERSHIP_TIMEZONE, 'UTC', timezone, ...supported])].sort()
-  }, [timezone])
   const resolved = useMemo(() => resolveExpiryDate(local, timezone), [local, timezone])
   const active = accounts.filter((account) => account.state === 'active')
   useEffect(() => {
@@ -152,18 +145,22 @@ export function ManagedBulkUpdate({
         : kind === 'sync'
           ? active.length > 0
           : true
-  const submit = () => {
-    if (locked || !valid) return
-    const selection = (kind === 'sync' ? active : accounts).map((account) => ({
+  const renewable = accounts.filter(
+    (account) => account.membershipType !== 'lifetime' && account.state !== 'offboarding'
+  )
+  const submit = (shortcut?: BulkMembership) => {
+    if (locked || (!shortcut && !valid)) return
+    const targets = shortcut?.mode === 'add-year' ? renewable : kind === 'sync' ? active : accounts
+    if (!targets.length) return
+    const selection = targets.map((account) => ({
       id: account.id,
       expectedVersion: account.version,
     }))
     if (kind === 'membership') {
-      if (mode === 'term' && !resolved.ok) return
       void mutation.submit({
         kind,
         accounts: selection,
-        membership: mode === 'lifetime' ? { mode } : { mode, local, timezone },
+        membership: shortcut ?? (mode === 'lifetime' ? { mode } : { mode, local }),
       })
     } else if (kind === 'move')
       if (edit && destination === 'individual')
@@ -218,6 +215,21 @@ export function ManagedBulkUpdate({
           )}
           {kind === 'membership' && (
             <>
+              {original ? (
+                <AnnualMembershipButton account={original} onSave={submit} />
+              ) : (
+                renewable.length > 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    title="Save a year from each account’s current expiry date, or from today for a new or expired membership."
+                    onClick={() => submit({ mode: 'add-year' })}
+                  >
+                    Add 12 months to {countLabel(renewable.length, 'account')}
+                  </Button>
+                )
+              )}
               <label className="block space-y-1 text-sm" htmlFor="member-bulk-mode">
                 <span>Membership type</span>
                 <select
@@ -232,22 +244,6 @@ export function ManagedBulkUpdate({
               </label>
               {mode === 'term' && (
                 <>
-                  <label className="block space-y-1 text-sm" htmlFor="member-bulk-timezone">
-                    <span>Timezone</span>
-                    <input
-                      id="member-bulk-timezone"
-                      className={field}
-                      list="member-bulk-timezones"
-                      value={timezone}
-                      required
-                      onChange={(event) => setTimezone(event.target.value)}
-                    />
-                    <datalist id="member-bulk-timezones">
-                      {zones.map((zone) => (
-                        <option key={zone} value={zone} />
-                      ))}
-                    </datalist>
-                  </label>
                   <label className="block space-y-1 text-sm" htmlFor="member-bulk-cutoff">
                     <span>Expiry date</span>
                     <input
@@ -262,15 +258,14 @@ export function ManagedBulkUpdate({
                     />
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    Membership stays active through the end of this date in the selected timezone.
+                    Membership stays active through the end of this date in your membership
+                    timezone.
                   </p>
                   {local && !resolved.ok && (
                     <p role="alert" className="text-sm text-destructive">
                       {resolved.code === 'NONEXISTENT_EXPIRY'
-                        ? 'This date does not exist in the selected timezone.'
-                        : resolved.code === 'INVALID_TIMEZONE'
-                          ? 'Enter a valid named timezone.'
-                          : 'Enter a valid date.'}
+                        ? 'This date does not exist in your membership timezone.'
+                        : 'Enter a valid date.'}
                     </p>
                   )}
                   {resolved.ok && resolved.expiry.at <= Date.now() && (

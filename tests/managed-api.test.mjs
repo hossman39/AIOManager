@@ -51,7 +51,7 @@ async function fixture(t, manifestOptions = {}, env = {}) {
       logger: false,
       serveStatic: false,
       fetch: noNetwork,
-      httpClient: { post: noNetwork },
+      publicRequest: noNetwork,
       manifestService: createManagedManifestService({
         resolve: noNetwork,
         read: noNetwork,
@@ -504,6 +504,10 @@ const fakeManifestResponse = () => ({
 test('group member bulk HTTP updates membership and queues sync without activating other members', async (t) => {
   const { app, db, networkCalls } = await fixture(t, {}, { MANAGED_WRITES_ENABLED: 'true' })
   const imported = (await app.inject(importRequest())).json().accounts
+  const zone = await app.inject(
+    managedPost('/settings', { expectedVersion: 1, membershipTimezone: 'Europe/London' })
+  )
+  assert.equal(zone.statusCode, 200, zone.body)
   const group = (await app.inject(managedPost('/groups', { name: 'Bulk HTTP group' }))).json().group
   const assigned = (
     await app.inject(
@@ -515,7 +519,7 @@ test('group member bulk HTTP updates membership and queues sync without activati
   ).json().accounts
   const payload = {
     accounts: assigned.map(({ account }) => ({ id: account.id, expectedVersion: account.version })),
-    membership: { mode: 'term', local: '2027-01-01T12:00', timezone: 'Europe/London' },
+    membership: { mode: 'term', local: '2027-01-01T12:00' },
   }
   const request = managedPost(`/groups/${group.id}/members/membership`, payload)
   const result = await app.inject(request)
@@ -881,6 +885,10 @@ test(
 test('account editing and bulk HTTP routes preserve saved identity and remain passive before first sync', async (t) => {
   const { app, db, networkCalls, start } = await fixture(t, {}, { MANAGED_WRITES_ENABLED: 'true' })
   const imported = await app.inject(importRequest())
+  const zone = await app.inject(
+    managedPost('/settings', { expectedVersion: 1, membershipTimezone: 'Europe/London' })
+  )
+  assert.equal(zone.statusCode, 200, zone.body)
   const id = imported.json().accounts[0].id
   const request = managedPost('/accounts/' + id + '/name', { name: 'TV room', expectedVersion: 1 })
   const renamed = await app.inject(request)
@@ -892,7 +900,7 @@ test('account editing and bulk HTTP routes preserve saved identity and remain pa
   const membership = await app.inject(
     managedPost('/accounts/bulk-membership', {
       accounts: [{ id, expectedVersion: 2 }],
-      membership: { mode: 'term', local: '2027-06-01T12:00', timezone: 'Europe/London' },
+      membership: { mode: 'term', local: '2027-06-01T12:00' },
     })
   )
   assert.equal(membership.statusCode, 200, membership.body)

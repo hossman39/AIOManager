@@ -518,7 +518,7 @@ export const useSyncStore = create<SyncState>()(
                             try {
                                 return JSON.parse(val)
                             } catch (e) {
-                                console.error(`[Sync] Failed to parse exported data:`, val.substring(0, 50))
+                                console.error(`[Sync] Failed to parse exported data:`, 'Invalid JSON')
                                 return {}
                             }
                         }
@@ -727,7 +727,7 @@ export const useSyncStore = create<SyncState>()(
         }),
         {
             name: 'stremio-manager-sync',
-            storage: createSafeStorage(),
+            storage: syncStorage(),
             partialize: (state) => ({
                 auth: state.auth,
                 lastSyncedAt: state.lastSyncedAt,
@@ -738,4 +738,11 @@ export const useSyncStore = create<SyncState>()(
         }
     )
 )
-import { createSafeStorage } from './safe-storage'
+import { syncStorage } from './safe-storage'
+
+useAuthStore.subscribe((state, previous) => {
+    if (state.isLocked && !previous.isLocked) {
+        const { auth } = useSyncStore.getState()
+        if (auth.password) useSyncStore.setState({ auth: { ...auth, password: '' } })
+    }
+})

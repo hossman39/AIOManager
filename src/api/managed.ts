@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { deriveSyncToken } from '@/lib/crypto'
 import type { CredentialUpload } from '@/lib/managed/prepare-import'
 import { parseAddonConfiguration, type ManagedAddon } from '../../shared/addon-config.js'
-import { validMembershipTimezone } from '../../shared/membership-expiry.js'
+import { validMembershipTimezone, MEMBERSHIP_TIMEZONE } from '../../shared/membership-expiry.js'
 import { parseAccountOverrides } from '../../shared/account-addons.js'
 import type { ExpiryNoticeSettings } from '../../shared/expiry-notice.js'
 
@@ -132,6 +132,7 @@ const statusSchema = z.object({
   }),
   writePaused: z.boolean(),
   ownerWritePaused: z.boolean(),
+  membershipTimezone: z.string().refine(validMembershipTimezone).default(MEMBERSHIP_TIMEZONE),
   writerReady: z.boolean().default(false),
   lastScanAt: z.number().int().nullable().default(null),
   lastBackupAt: z.number().int().nullable().default(null),
@@ -376,11 +377,9 @@ export type ManagedStatus = z.infer<typeof statusSchema>
 export type ManagedActivationPreview = z.infer<typeof activationPreviewSchema>
 export type ManagedExecution = z.infer<typeof executionSchema>
 export type ManagedActivation = { expectedVersion: number; receipt: string; allowEmpty: boolean }
-export type ManagedSettings = {
-  expectedVersion: number | null
-  writePaused: boolean
-  safeMode: boolean
-}
+export type ManagedSettings = { expectedVersion: number | null } & (
+  { writePaused: boolean; safeMode: boolean } | { membershipTimezone: string }
+)
 export type ManagedExpiryNotice = z.infer<typeof expiryNoticeSchema>
 export type ManagedGroup = z.infer<typeof groupSchema>
 export type ManagedGroupSummary = z.infer<typeof groupSummarySchema>
@@ -392,12 +391,10 @@ export type ManagedGroupChanges = ManagedGroupDraft & {
   expectedVersion: number
   allowEmpty: boolean
 }
-export type MembershipChange =
-  | { mode: 'lifetime'; expectedVersion: number }
-  | { mode: 'term'; expectedVersion: number; local: string; offset?: number; timezone?: string }
 export type BulkMembership =
-  | { mode: 'lifetime' }
+  | { mode: 'lifetime' | 'add-year' | 'start-year' }
   | { mode: 'term'; local: string; offset?: number; timezone?: string }
+export type MembershipChange = BulkMembership & { expectedVersion: number }
 export type GroupMemberSelection = { id: string; expectedVersion: number }[]
 
 const errorMessages = {

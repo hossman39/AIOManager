@@ -78,7 +78,7 @@ try {
       ? { stremioProvider: createStremioProvider({ fetch: fake.fetch, spacingMs: 50 }) }
       : {}),
     fetch: noProvider,
-    httpClient: { post: noProvider },
+    publicRequest: noProvider,
     manifestService,
   })
   const address = await app.listen({ host: '127.0.0.1', port: 0 })

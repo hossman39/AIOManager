@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24.21.0'
+          node-version: '24.22.3'
           package-manager-cache: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm rebuild better-sqlite3 --ignore-scripts=false
@@ -36,7 +36,8 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm test
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
+      - run: npm audit --prefix server --audit-level=high
 
   postgres:
     name: PostgreSQL integration
@@ -64,28 +65,40 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24.21.0'
+          node-version: '24.22.3'
           package-manager-cache: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --test tests/postgres-integration.test.mjs
 
   container:
     name: Container / ${{ matrix.platform }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24.21.0'
+          node-version: '24.22.3'
           package-manager-cache: false
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - run: docker buildx build --load --platform '${{ matrix.platform }}' --tag aiomanager-smoke:local .
+      - name: Scan the packaged runtime for high and critical advisories and secrets
+        shell: bash
+        run: |
+          docker save aiomanager-smoke:local -o "$RUNNER_TEMP/aiomanager.tar"
+          chmod a+r "$RUNNER_TEMP/aiomanager.tar"
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges \
+            -v "$RUNNER_TEMP/aiomanager.tar:/image.tar:ro" \
+            ghcr.io/aquasecurity/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb \
+            image --input /image.tar --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 1 --no-progress
       - run: node scripts/container-smoke.mjs aiomanager-smoke:local

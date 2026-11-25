@@ -635,6 +635,14 @@ export function managedRuntimeContract(prefix, options, fixture) {
     async (s) => {
       await s.activate()
       await s.runtime.runOnce()
+      await s.repository.setSettings(
+        firstAuth,
+        {
+          expectedVersion: (await s.repository.status(firstAuth)).version,
+          membershipTimezone: 'Asia/Kathmandu',
+        },
+        randomUUID()
+      )
       let account = await s.repository.getAccount(firstAuth, s.id)
       await s.repository.setMembership(
         firstAuth,
@@ -642,7 +650,6 @@ export function managedRuntimeContract(prefix, options, fixture) {
         {
           expectedVersion: account.version,
           mode: 'term',
-          timezone: 'Asia/Kathmandu',
           local: '2026-09-01T12:00',
         },
         randomUUID()

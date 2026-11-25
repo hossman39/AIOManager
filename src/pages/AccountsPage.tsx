@@ -490,8 +490,9 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           onReload={reload}
         />
       )}
-      {editing && editing.kind !== 'name' && (
+      {editing && editing.kind !== 'name' && inventory.status && (
         <ManagedBulkUpdate
+          timezone={inventory.status.membershipTimezone}
           api={api}
           accounts={[editing.account]}
           edit={editing.kind}
@@ -500,8 +501,9 @@ function AccountsWorkspace({ api }: { api: ReturnType<typeof createManagedApi> }
           onReload={reload}
         />
       )}
-      {bulk && (
+      {bulk && inventory.status && (
         <ManagedBulkUpdate
+          timezone={inventory.status.membershipTimezone}
           api={api}
           accounts={bulk}
           onClose={() => setBulk(null)}
