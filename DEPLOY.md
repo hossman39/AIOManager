@@ -12,6 +12,8 @@ Pull the public image from the fork. Docker selects AMD64 or ARM64 for your host
 docker pull ghcr.io/hossman39/aiomanager:2.3.2
 ```
 
+The verified multi-architecture digest is `ghcr.io/hossman39/aiomanager@sha256:b9b1aff794a2e5be7c0e0a62f2f6939001fbb1666e7b0634c4c4aa1b49f42095`.
+
 Use `ghcr.io/hossman39/aiomanager:2.3.2` as the image in your existing Portainer
 stack. To pin the exact build, use the full `ghcr.io/...` value of
 `AIOMANAGER_IMAGE` in [.env.example](.env.example). If your stack already uses
